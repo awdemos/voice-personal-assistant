@@ -19,8 +19,13 @@ const findTs = (dir) => {
   const results = [];
   for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, f.name);
-    if (f.isDirectory()) results.push(...findTs(full));
-    else if (f.name.endsWith('.ts') && !f.name.endsWith('.d.ts')) results.push(full);
+    if (f.isDirectory()) {
+      // Skip test directories — they import devDependencies not meant for bundling
+      if (f.name === 'test' || f.name === '__tests__') continue;
+      results.push(...findTs(full));
+    } else if (f.name.endsWith('.ts') && !f.name.endsWith('.d.ts')) {
+      results.push(full);
+    }
   }
   return results;
 };

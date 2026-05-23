@@ -66,6 +66,8 @@ If you’re looking for a hosted desktop recording API, consider checking out [R
 
 <small>Requires macOS 12+ (Apple Silicon & Intel) or Windows 10/11</small>
 
+> **Linux users:** Linux builds are experimental. System audio capture is not supported — only microphone transcription works. You may encounter stability issues.
+
 <br/>
 
 **<span style="color: #ef4444">👥 9,000+ Users</span>** &nbsp;·&nbsp; **<span style="color: #f97316">🔥 700+ DAU</span>** &nbsp;·&nbsp; **<span style="color: #22c55e">💸 $0 vs $149/mo rivals</span>** &nbsp;·&nbsp; **<span style="color: #3b82f6">⚡ <500ms latency</span>** &nbsp;·&nbsp; **<span style="color: #a855f7">🛡️ 0 data breaches</span>**

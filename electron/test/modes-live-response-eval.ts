@@ -711,7 +711,7 @@ async function modePromptFor(mode: string): Promise<string> {
   // of the cloud-tier prompts.ts. Selected by env vars so the default
   // cloud eval path is untouched.
   if (process.env.NATIVELY_EVAL_USE_OLLAMA === '1' || process.env.NATIVELY_EVAL_TIER === 'tiny') {
-    const tiny = await import('../llm/tinyPrompts') as Record<string, string>;
+    const tiny = await import('../llm/tinyPrompts') as unknown as Record<string, string>;
     const byMode: Record<string, string> = {
       general: tiny.TINY_MODE_GENERAL_PROMPT,
       sales: tiny.TINY_MODE_SALES_PROMPT,
@@ -724,7 +724,7 @@ async function modePromptFor(mode: string): Promise<string> {
     return byMode[mode] ?? tiny.TINY_MODE_GENERAL_PROMPT;
   }
 
-  promptModule ??= await import('../llm/prompts') as PromptModule;
+  promptModule ??= await import('../llm/prompts') as unknown as PromptModule;
   const byMode: Record<string, string> = {
     general: promptModule.MODE_GENERAL_PROMPT,
     sales: promptModule.MODE_SALES_PROMPT,

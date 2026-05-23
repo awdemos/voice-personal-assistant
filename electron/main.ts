@@ -1548,6 +1548,18 @@ export class AppState {
             fellBack: true,
             reason: 'screen-recording-permission-denied',
           });
+        } else if (process.platform === 'linux') {
+          // Linux: system audio capture is not implemented (Rust fallback stub
+          // always errors). Skip creation entirely to avoid an infinite error→
+          // recovery loop. Mic-only mode is the expected behaviour on Linux.
+          console.log('[Main] Skipping SystemAudioCapture init — system audio capture is not supported on Linux. Meeting will run mic-only.');
+          this.broadcastDeviceSelection({
+            kind: 'output',
+            requested: null,
+            actual: null,
+            fellBack: true,
+            reason: 'linux-unsupported',
+          });
         } else {
           this.systemAudioCapture = new SystemAudioCapture();
           this.wireSystemCapture(this.systemAudioCapture);
@@ -1696,29 +1708,32 @@ export class AppState {
     console.log('[Main] System resume — restarting captures so CoreAudio/cpal handles are fresh.');
 
     // System audio (CoreAudio Tap is the most fragile across sleep cycles).
-    if (this.systemAudioCapture) {
-      try {
-        this.systemAudioCapture.destroy();
-      } catch (e) {
-        console.warn('[Main] Resume: system capture destroy threw:', e);
+    // Skip on Linux — system audio capture is unsupported there.
+    if (process.platform !== 'linux') {
+      if (this.systemAudioCapture) {
+        try {
+          this.systemAudioCapture.destroy();
+        } catch (e) {
+          console.warn('[Main] Resume: system capture destroy threw:', e);
+        }
+        this.systemAudioCapture = null;
       }
-      this.systemAudioCapture = null;
-    }
-    try {
-      this.systemAudioCapture = new SystemAudioCapture(this._lastRequestedOutputDeviceId);
-      this._sysSttRateApplied = false;
-      this.wireSystemCapture(this.systemAudioCapture, '(Resume)');
-      this.systemAudioCapture.start();
-    } catch (err) {
-      console.error('[Main] Resume: failed to restart system capture:', err);
-      this.broadcast('audio-capture-failed', {
-        channel: 'system',
-        message: 'System audio capture failed to restart after wake. End and restart the meeting to recover.',
-        attempt: 0,
-        maxAttempts: 0,
-        terminal: true,
-        stuck: false,
-      });
+      try {
+        this.systemAudioCapture = new SystemAudioCapture(this._lastRequestedOutputDeviceId);
+        this._sysSttRateApplied = false;
+        this.wireSystemCapture(this.systemAudioCapture, '(Resume)');
+        this.systemAudioCapture.start();
+      } catch (err) {
+        console.error('[Main] Resume: failed to restart system capture:', err);
+        this.broadcast('audio-capture-failed', {
+          channel: 'system',
+          message: 'System audio capture failed to restart after wake. End and restart the meeting to recover.',
+          attempt: 0,
+          maxAttempts: 0,
+          terminal: true,
+          stuck: false,
+        });
+      }
     }
 
     // Mic — usually survives sleep but recreate to be safe; cpal exclusive
@@ -1935,48 +1950,51 @@ export class AppState {
     this._micRecoveryAttempts = 0;
 
     // 1. System Audio (Output Capture)
-    if (this.systemAudioCapture) {
-      // destroy() calls stop() AND removeAllListeners(), preventing EventEmitter listener leaks.
-      // Using stop()+null would orphan all 'data', 'speech_ended', 'sample_rate_changed'
-      // closures (they still hold a ref to `this`) and trigger them on the next meeting.
-      this.systemAudioCapture.destroy();
-      this.systemAudioCapture = null;
-    }
+    // Skip on Linux — system audio capture is unsupported (Rust fallback stub errors).
+    if (process.platform !== 'linux') {
+      if (this.systemAudioCapture) {
+        // destroy() calls stop() AND removeAllListeners(), preventing EventEmitter listener leaks.
+        // Using stop()+null would orphan all 'data', 'speech_ended', 'sample_rate_changed'
+        // closures (they still hold a ref to `this`) and trigger them on the next meeting.
+        this.systemAudioCapture.destroy();
+        this.systemAudioCapture = null;
+      }
 
-    try {
-      console.log('[Main] Initializing SystemAudioCapture...');
-      this.systemAudioCapture = new SystemAudioCapture(wantedOutput);
-      this._sysSttRateApplied = false;
-      this.wireSystemCapture(this.systemAudioCapture, '(Reconfigured)');
-      console.log('[Main] SystemAudioCapture initialized.');
-      this.broadcastDeviceSelection({
-        kind: 'output',
-        requested: wantedOutput || null,
-        actual: wantedOutput || 'default',
-        fellBack: false,
-      });
-    } catch (err) {
-      console.warn('[Main] Failed to initialize SystemAudioCapture with preferred ID. Falling back to default.', err);
       try {
-        this.systemAudioCapture = new SystemAudioCapture(); // Default
+        console.log('[Main] Initializing SystemAudioCapture...');
+        this.systemAudioCapture = new SystemAudioCapture(wantedOutput);
         this._sysSttRateApplied = false;
-        this.wireSystemCapture(this.systemAudioCapture, '(Default)');
+        this.wireSystemCapture(this.systemAudioCapture, '(Reconfigured)');
+        console.log('[Main] SystemAudioCapture initialized.');
         this.broadcastDeviceSelection({
           kind: 'output',
           requested: wantedOutput || null,
-          actual: 'default',
-          fellBack: true,
-          reason: (err as Error)?.message || 'unknown',
+          actual: wantedOutput || 'default',
+          fellBack: false,
         });
-      } catch (err2) {
-        console.error('[Main] Failed to initialize SystemAudioCapture (Default):', err2);
-        this.broadcastDeviceSelection({
-          kind: 'output',
-          requested: wantedOutput || null,
-          actual: null,
-          fellBack: true,
-          reason: `Both preferred and default failed: ${(err2 as Error)?.message || 'unknown'}`,
-        });
+      } catch (err) {
+        console.warn('[Main] Failed to initialize SystemAudioCapture with preferred ID. Falling back to default.', err);
+        try {
+          this.systemAudioCapture = new SystemAudioCapture(); // Default
+          this._sysSttRateApplied = false;
+          this.wireSystemCapture(this.systemAudioCapture, '(Default)');
+          this.broadcastDeviceSelection({
+            kind: 'output',
+            requested: wantedOutput || null,
+            actual: 'default',
+            fellBack: true,
+            reason: (err as Error)?.message || 'unknown',
+          });
+        } catch (err2) {
+          console.error('[Main] Failed to initialize SystemAudioCapture (Default):', err2);
+          this.broadcastDeviceSelection({
+            kind: 'output',
+            requested: wantedOutput || null,
+            actual: null,
+            fellBack: true,
+            reason: `Both preferred and default failed: ${(err2 as Error)?.message || 'unknown'}`,
+          });
+        }
       }
     }
 
@@ -2313,10 +2331,13 @@ export class AppState {
       // Pass undefined (not the new device id) so CoreAudio picks up the new
       // default at construction time. This is intentional: binding to a
       // stable id would defeat the whole point of "follow the user's route".
-      const fresh = new SystemAudioCapture(undefined);
-      this.systemAudioCapture = fresh;
-      this.wireSystemCapture(fresh, '(RouteChanged)');
-      fresh.start();
+      // Skip on Linux — system audio capture is unsupported (Rust fallback stub errors).
+      if (process.platform !== 'linux') {
+        const fresh = new SystemAudioCapture(undefined);
+        this.systemAudioCapture = fresh;
+        this.wireSystemCapture(fresh, '(RouteChanged)');
+        fresh.start();
+      }
       // Tell the renderer what's happening so any "interviewer went silent"
       // banners can clear once chunks resume.
       this.broadcastDeviceSelection({
