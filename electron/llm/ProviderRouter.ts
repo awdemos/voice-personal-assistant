@@ -1,4 +1,4 @@
-export type LLMProviderId = 'natively' | 'groq' | 'codex' | 'gemini_flash' | 'gemini_pro' | 'openai' | 'claude';
+export type LLMProviderId = 'natively' | 'groq' | 'codex' | 'gemini_flash' | 'gemini_pro' | 'openai' | 'claude' | 'kimi';
 export type ProviderCapability = 'chat' | 'stream_chat' | 'structured' | 'vision';
 export type ProviderAttemptStatus = 'available' | 'unavailable';
 export type ProviderUnavailableReason = 'missing_api_key' | 'missing_config' | 'unsupported_capability' | 'disabled';
@@ -34,6 +34,7 @@ export interface ProviderAvailabilityState {
     hasGemini?: boolean;
     hasOpenAI?: boolean;
     hasClaude?: boolean;
+    hasKimi?: boolean;
 }
 
 export interface ProviderModelState {
@@ -44,6 +45,7 @@ export interface ProviderModelState {
     geminiPro?: string;
     openai?: string;
     claude?: string;
+    kimi?: string;
 }
 
 export interface ProviderRouteOptions {
@@ -145,10 +147,18 @@ export function routeLLMProviders(options: ProviderRouteOptions): ProviderAttemp
         unavailableReason: 'missing_api_key',
         supports: ['chat', 'stream_chat', 'structured', 'vision'],
     };
+    const kimi: ProviderSpec = {
+        provider: 'kimi',
+        name: `Kimi (${models.kimi ?? 'default'})`,
+        model: models.kimi,
+        available: Boolean(availability.hasKimi),
+        unavailableReason: 'missing_api_key',
+        supports: ['chat', 'stream_chat', 'structured', 'vision'],
+    };
 
     const orderedSpecs = options.multimodal
-        ? [natively, codex, openai, geminiFlash, claude, geminiPro, groq]
-        : [natively, groq, codex, geminiFlash, geminiPro, openai, claude];
+        ? [natively, codex, openai, kimi, geminiFlash, claude, geminiPro, groq]
+        : [natively, groq, codex, kimi, geminiFlash, geminiPro, openai, claude];
 
     const deniedScopes = getDeniedDataScopes(options.dataScopes, options.scopePolicy);
 
@@ -185,11 +195,11 @@ export interface ProviderChoice {
 }
 
 // Vision-capable providers (ordered by capability)
-const VISION_PROVIDERS = ['gemini', 'claude', 'openai', 'groq'];
+const VISION_PROVIDERS = ['gemini', 'claude', 'openai', 'groq', 'kimi'];
 // Low-latency providers (ordered by speed)
-const LOW_LATENCY_PROVIDERS = ['groq', 'gemini'];
+const LOW_LATENCY_PROVIDERS = ['groq', 'gemini', 'kimi'];
 // Quality providers (for summary/recap tasks)
-const QUALITY_PROVIDERS = ['claude', 'openai', 'gemini_pro'];
+const QUALITY_PROVIDERS = ['claude', 'openai', 'gemini_pro', 'kimi'];
 // Local providers (for privacy mode)
 const LOCAL_PROVIDERS = ['ollama', 'custom'];
 
@@ -265,7 +275,7 @@ export class ProviderRouter {
     constructor(circuitConfig?: Partial<CircuitBreakerConfig>) {
         const config = { ...this.defaultCircuitConfig, ...circuitConfig };
         // Initialize circuit breakers for each provider
-        ['gemini', 'groq', 'openai', 'claude', 'natively', 'codex'].forEach(provider => {
+        ['gemini', 'groq', 'openai', 'claude', 'natively', 'codex', 'kimi'].forEach(provider => {
             this.circuitBreakers.set(provider, new CircuitBreaker(provider, config));
         });
     }
@@ -287,16 +297,15 @@ export class ProviderRouter {
 
         // Rule 2: Check circuit breakers and skip unhealthy providers
         const availableProviders = this.filterHealthyProviders(
-            ['gemini', 'groq', 'openai', 'claude', 'natively', 'codex'],
+            ['gemini', 'groq', 'openai', 'claude', 'natively', 'codex', 'kimi'],
             health
         );
 
         if (availableProviders.length === 0) {
-            // All providers down, return lowest priority
             return {
-                provider: 'gemini',
-                model: 'gemini-3.1-flash-lite-preview',
-                reason: 'all providers unhealthy, using Gemini as last resort'
+                provider: 'kimi',
+            model: 'kimi-k2.6-fast',
+                reason: 'all providers unhealthy, using Kimi as last resort'
             };
         }
 
@@ -324,11 +333,10 @@ export class ProviderRouter {
             if (modeProvider) return modeProvider;
         }
 
-        // Default: Groq for speed (most bang for buck on free tier)
         return {
-            provider: 'groq',
-            model: 'llama-3.3-70b-versatile',
-            reason: 'default routing: Groq (fastest free tier)'
+            provider: 'kimi',
+            model: 'kimi-k2.6-fast',
+            reason: 'default routing: Kimi (preferred provider)'
         };
     }
 
@@ -365,12 +373,11 @@ export class ProviderRouter {
         available: string[],
         health: Record<string, ProviderHealthStatus>
     ): ProviderChoice | null {
-        // Mode-specific routing (simplified)
         const modePreferences: Record<ModeTemplateType, string[]> = {
-            'sales': ['groq', 'gemini', 'openai'],
-            'recruiting': ['claude', 'groq', 'gemini'],
-            'interview': ['gemini', 'groq', 'openai'],
-            'default': ['groq', 'gemini', 'openai']
+            'sales': ['kimi', 'groq', 'openai'],
+            'recruiting': ['claude', 'kimi', 'groq'],
+            'interview': ['kimi', 'groq', 'openai'],
+            'default': ['kimi', 'groq', 'openai']
         };
 
         const preferences = modePreferences[mode] || modePreferences['default'];
@@ -383,6 +390,7 @@ export class ProviderRouter {
             'groq': 'llama-3.3-70b-versatile',
             'openai': 'gpt-5.4',
             'claude': 'claude-sonnet-4-6',
+            'kimi': 'kimi-k2.6-fast',
             'natively': 'default',
             'codex': 'default'
         };

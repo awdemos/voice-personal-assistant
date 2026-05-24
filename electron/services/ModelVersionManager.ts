@@ -327,6 +327,7 @@ export class ModelVersionManager {
   private geminiApiKey: string | null = null;
   private claudeApiKey: string | null = null;
   private groqApiKey: string | null = null;
+  private kimiApiKey: string | null = null;
 
   constructor() {
     this.persistPath = path.join(app.getPath('userData'), PERSISTENCE_FILENAME);
@@ -340,11 +341,13 @@ export class ModelVersionManager {
     gemini?: string | null;
     claude?: string | null;
     groq?: string | null;
+    kimi?: string | null;
   }): void {
     if (keys.openai !== undefined) this.openaiApiKey = keys.openai;
     if (keys.gemini !== undefined) this.geminiApiKey = keys.gemini;
     if (keys.claude !== undefined) this.claudeApiKey = keys.claude;
     if (keys.groq !== undefined) this.groqApiKey = keys.groq;
+    if (keys.kimi !== undefined) this.kimiApiKey = keys.kimi;
   }
 
   // ─── Tier Retrieval ────────────────────────────────────────────────

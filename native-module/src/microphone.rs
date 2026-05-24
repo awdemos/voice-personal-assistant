@@ -5,6 +5,7 @@
 // 2. No mutexes, allocations, or DSP in callback
 // 3. Background thread: drains buffer, resamples, emits to JS
 
+use crate::{safe_println, safe_eprintln};
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
@@ -105,7 +106,7 @@ fn resolve_input_device(host: &cpal::Host, device_id: Option<&str>) -> Result<cp
                 1 => "case-insensitive",
                 _ => "fuzzy",
             };
-            println!(
+            safe_println!(
                 "[Microphone] Using {} match for input device: requested='{}' matched='{}'",
                 label, requested_id, matched_name
             );
@@ -171,7 +172,7 @@ fn pick_supported_config(device: &cpal::Device) -> Result<cpal::SupportedStreamC
         return Ok(default_cfg);
     }
 
-    println!(
+    safe_println!(
         "[Microphone] Default config has unsupported format ({:?}); negotiating from supported_input_configs()...",
         default_cfg.sample_format()
     );
@@ -196,7 +197,7 @@ fn pick_supported_config(device: &cpal::Device) -> Result<cpal::SupportedStreamC
             let cfg = range
                 .clone()
                 .with_sample_rate(cpal::SampleRate(target_rate));
-            println!(
+            safe_println!(
                 "[Microphone] Negotiated fallback config: {}Hz, {}ch, {:?}",
                 cfg.sample_rate().0,
                 cfg.channels(),
@@ -222,7 +223,7 @@ impl MicrophoneStream {
         let sample_rate = config.sample_rate().0;
         let channels = config.channels() as usize;
 
-        println!(
+        safe_println!(
             "[Microphone] Device: {}, Rate: {}Hz, Channels: {}, Format: {:?}",
             device.name().unwrap_or_default(),
             sample_rate,
@@ -272,7 +273,7 @@ impl MicrophoneStream {
                 .play()
                 .map_err(|e| anyhow::anyhow!("Failed to start stream: {}", e))?;
             self.is_running.store(true, Ordering::SeqCst);
-            println!("[Microphone] Stream started");
+            safe_println!("[Microphone] Stream started");
         }
         Ok(())
     }
@@ -284,7 +285,7 @@ impl MicrophoneStream {
                 .pause()
                 .map_err(|e| anyhow::anyhow!("Failed to pause stream: {}", e))?;
             self.is_running.store(false, Ordering::SeqCst);
-            println!("[Microphone] Stream paused");
+            safe_println!("[Microphone] Stream paused");
         }
         Ok(())
     }
@@ -331,7 +332,7 @@ fn build_input_stream(
 ) -> Result<Stream> {
     let err_fn = move |err: cpal::StreamError| {
         let msg = format!("{}", err);
-        eprintln!("[Microphone] Stream error: {}", msg);
+        safe_eprintln!("[Microphone] Stream error: {}", msg);
         // Publish error to err_signal so the DSP thread can forward to JS.
         // First-error-wins; subsequent errors are dropped to avoid log spam.
         if let Ok(mut slot) = err_signal.lock() {

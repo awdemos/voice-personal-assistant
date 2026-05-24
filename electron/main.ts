@@ -1548,18 +1548,6 @@ export class AppState {
             fellBack: true,
             reason: 'screen-recording-permission-denied',
           });
-        } else if (process.platform === 'linux') {
-          // Linux: system audio capture is not implemented (Rust fallback stub
-          // always errors). Skip creation entirely to avoid an infinite error→
-          // recovery loop. Mic-only mode is the expected behaviour on Linux.
-          console.log('[Main] Skipping SystemAudioCapture init — system audio capture is not supported on Linux. Meeting will run mic-only.');
-          this.broadcastDeviceSelection({
-            kind: 'output',
-            requested: null,
-            actual: null,
-            fellBack: true,
-            reason: 'linux-unsupported',
-          });
         } else {
           this.systemAudioCapture = new SystemAudioCapture();
           this.wireSystemCapture(this.systemAudioCapture);
@@ -1950,8 +1938,7 @@ export class AppState {
     this._micRecoveryAttempts = 0;
 
     // 1. System Audio (Output Capture)
-    // Skip on Linux — system audio capture is unsupported (Rust fallback stub errors).
-    if (process.platform !== 'linux') {
+    
       if (this.systemAudioCapture) {
         // destroy() calls stop() AND removeAllListeners(), preventing EventEmitter listener leaks.
         // Using stop()+null would orphan all 'data', 'speech_ended', 'sample_rate_changed'
@@ -1996,7 +1983,6 @@ export class AppState {
           });
         }
       }
-    }
 
     // 2. Microphone (Input Capture)
     if (this.microphoneCapture) {

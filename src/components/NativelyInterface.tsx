@@ -53,6 +53,7 @@ const REMARK_PLUGINS = [remarkGfm, remarkMath];
 const REHYPE_PLUGINS = [rehypeKatex];
 import { analytics, detectProviderType } from '../lib/analytics/analytics.service';
 import { useShortcuts } from '../hooks/useShortcuts';
+import { isLinux } from '../utils/platformUtils';
 import { useResolvedTheme } from '../hooks/useResolvedTheme';
 import { getOverlayAppearance, OVERLAY_OPACITY_DEFAULT, getGlassOverlayAppearance } from '../lib/overlayAppearance';
 import type { MeetingInterfaceTheme } from '../lib/meetingInterfaceTheme';
@@ -535,12 +536,15 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
             a: ({ node, ...props }: any) => <a className={`hover:underline ${isLightTheme ? 'text-blue-600 hover:text-blue-700' : 'text-blue-400 hover:text-blue-300'}`} target="_blank" rel="noopener noreferrer" {...props} />,
         },
         whatToAnswerText: {
-            p: ({ node, ...props }: any) => <p className="mb-2 last:mb-0" {...props} />,
+            p: ({ node, ...props }: any) => <p className="mb-2 last:mb-0 whitespace-pre-wrap" {...props} />,
             strong: ({ node, ...props }: any) => <strong className={`font-bold ${isLightTheme ? 'text-emerald-700' : 'text-emerald-100'}`} {...props} />,
             em: ({ node, ...props }: any) => <em className={`italic ${isLightTheme ? 'text-emerald-700/80' : 'text-emerald-200/80'}`} {...props} />,
             ul: ({ node, ...props }: any) => <ul className="list-disc ml-4 mb-2 space-y-1" {...props} />,
             ol: ({ node, ...props }: any) => <ol className="list-decimal ml-4 mb-2 space-y-1" {...props} />,
             li: ({ node, ...props }: any) => <li className="pl-1" {...props} />,
+            code: ({ node, ...props }: any) => <code className={`overlay-inline-code-surface rounded px-1 py-0.5 text-xs font-mono ${isLightTheme ? 'text-slate-800' : ''}`} {...props} />,
+            blockquote: ({ node, ...props }: any) => <blockquote className={`border-l-2 pl-3 italic my-2 ${isLightTheme ? 'border-emerald-500/30 text-slate-600' : 'border-emerald-500/50 text-slate-400'}`} {...props} />,
+            a: ({ node, ...props }: any) => <a className="underline hover:opacity-80" target="_blank" rel="noopener noreferrer" {...props} />,
         },
         recapText: {
             p: ({ node, ...props }: any) => <p className="mb-2 last:mb-0" {...props} />,
@@ -969,13 +973,14 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
     }, []);
 
     // Ensure overlay is expanded when requested by main process (e.g. after switching to overlay mode).
-    // IMPORTANT: set isStealthRef before setIsExpanded so that if isExpanded was false, the
-    // isExpanded effect fires showWindow(true) instead of showWindow(false). Without this,
-    // ensure-expanded on a collapsed overlay would trigger show()+focus(), breaking stealth.
+    // ensure-expanded is sent from the main process when the overlay window is restored
+    // (after screenshot, toggle visibility, etc.). We expand the UI here. Do NOT set
+    // isStealthRef — the main process already handled window focus correctly. Setting
+    // isStealthRef would cause the [isExpanded] effect to call showWindow(true), which
+    // downgrades the window to showInactive() and strips OS focus on Linux.
     useEffect(() => {
         if (!window.electronAPI?.onEnsureExpanded) return;
         const unsubscribe = window.electronAPI.onEnsureExpanded(() => {
-            isStealthRef.current = true;
             setIsExpanded(true);
         });
         return () => unsubscribe();
@@ -1010,6 +1015,10 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
             if (prev.some(s => s.path === data.path)) return prev;
             const updated = [...prev, data];
             return updated.slice(-5); // Keep last 5
+        });
+        // Auto-focus the text input so the user can type immediately after a screenshot
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => textInputRef.current?.focus());
         });
     };
 
@@ -2264,6 +2273,9 @@ Provide only the answer, nothing else.`;
                                 </div>
                             );
                         })}
+                        {msg.isStreaming && (
+                            <span className="inline-block w-2 h-4 ml-0.5 bg-emerald-400/80 animate-pulse rounded-sm align-middle" />
+                        )}
                     </div>
                 </div>
             );
@@ -3008,6 +3020,9 @@ Provide only the answer, nothing else.`;
     // stealthTapStart() in capture phase, so by the time we get here, the
     // tap is engaging and DOM focus is no longer the typing path.
     const blockInputFocus = useCallback((e: React.MouseEvent<HTMLInputElement>) => {
+        // Linux has no CGEventTap stealth typing — blocking focus would make
+        // the input permanently unfocusable. Let the browser handle focus.
+        if (isLinux) return;
         // When auto-engage is disabled (composition IME present), the click
         // does NOT engage the tap — so blocking DOM focus would leave the
         // user with no way to type. Let the browser focus the input so the

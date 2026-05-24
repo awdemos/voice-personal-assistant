@@ -32,6 +32,7 @@
 
 #![cfg(target_os = "macos")]
 
+use crate::{safe_println, safe_eprintln};
 use napi::bindgen_prelude::*;
 use objc2::msg_send;
 use objc2::runtime::{AnyObject, Bool, Sel};
@@ -219,7 +220,7 @@ pub fn apply_stealth_to_window(handle: Buffer) -> Result<()> {
             // Log to stderr (no eprintln noise unless verboseLogging is on,
             // but this is rare enough — once per overlay creation — that the
             // line is acceptable). Caller (WindowHelper) ignores stderr.
-            eprintln!(
+            safe_eprintln!(
                 "[stealth_window] _setPreventsActivation: SPI unavailable on this \
                  macOS — public-API stealth still active, but window-level \
                  activation may leak in edge cases (e.g. style-mask updates)."

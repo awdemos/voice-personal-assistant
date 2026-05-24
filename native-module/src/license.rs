@@ -1,3 +1,4 @@
+use crate::{safe_println, safe_eprintln};
 use sha2::{Digest, Sha256};
 
 /// Returns a deterministic hardware fingerprint (SHA-256 hash of the machine UID).
@@ -61,7 +62,7 @@ impl Task for VerifyGumroadTask {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                         let success = json["success"].as_bool().unwrap_or(false);
                         let msg = json["message"].as_str().unwrap_or("");
-                        println!(
+                        safe_println!(
                             "[LicenseRust] Gumroad response (pid={}): success={}, msg={}",
                             pid, success, msg
                         );
@@ -70,7 +71,7 @@ impl Task for VerifyGumroadTask {
                         }
                         last_error = msg.to_string();
                     } else {
-                        println!("[LicenseRust] Gumroad response (pid={}): parse error", pid);
+                        safe_println!("[LicenseRust] Gumroad response (pid={}): parse error", pid);
                         last_error = "parse error".to_string();
                     }
                 }
@@ -151,7 +152,7 @@ impl Task for VerifyDodoTask {
                         // Dodo returns { "id": "lki_xxx", "license_key": "...", ... } on success
                         if status == 200 || status == 201 {
                             if let Some(instance_id) = json["id"].as_str() {
-                                println!(
+                                safe_println!(
                                     "[LicenseRust] Dodo activation success (status={}, instance_id present)",
                                     status
                                 );
@@ -166,7 +167,7 @@ impl Task for VerifyDodoTask {
                         // We treat this as a retriable error so LicenseManager can handle
                         // the duplicate flow (show "already activated" message).
                         if status == 409 {
-                            println!(
+                            safe_println!(
                                 "[LicenseRust] Dodo activation: 409 conflict (duplicate activation)"
                             );
                             // Return the instance_id from the conflict body if available,
@@ -184,7 +185,7 @@ impl Task for VerifyDodoTask {
                         // Return a stable code so TypeScript doesn't need to match human-readable strings.
                         if status == 422 {
                             let code = json["code"].as_str().unwrap_or("LIMIT_REACHED");
-                            println!(
+                            safe_println!(
                                 "[LicenseRust] Dodo activation failed: status={}, err={}",
                                 status, code
                             );
@@ -198,14 +199,14 @@ impl Task for VerifyDodoTask {
                             .or_else(|| json["message"].as_str())
                             .unwrap_or("unknown error");
 
-                        println!(
+                        safe_println!(
                             "[LicenseRust] Dodo activation failed: status={}, err={}",
                             status, err
                         );
                         Ok(format!("ERR:dodo:{}", err))
                     }
                     Err(_) => {
-                        println!(
+                        safe_println!(
                             "[LicenseRust] Dodo activation: non-JSON response (status={})",
                             status
                         );
@@ -214,7 +215,7 @@ impl Task for VerifyDodoTask {
                 }
             }
             Err(e) => {
-                println!("[LicenseRust] Dodo network error: {}", e);
+                safe_println!("[LicenseRust] Dodo network error: {}", e);
                 Ok(format!("ERR:dodo:network:{}", e))
             }
         }
@@ -290,7 +291,7 @@ impl Task for ValidateDodoTask {
                 match serde_json::from_str::<serde_json::Value>(&body_text) {
                     Ok(json) => {
                         let valid = json["valid"].as_bool().unwrap_or(false);
-                        println!(
+                        safe_println!(
                             "[LicenseRust] Dodo validate response: status={}, valid={}",
                             status, valid
                         );
@@ -307,7 +308,7 @@ impl Task for ValidateDodoTask {
                         Ok("ERR:dodo:validate unexpected state".to_string())
                     }
                     Err(_) => {
-                        println!(
+                        safe_println!(
                             "[LicenseRust] Dodo validate: non-JSON response (status={})",
                             status
                         );
@@ -320,7 +321,7 @@ impl Task for ValidateDodoTask {
             }
             Err(e) => {
                 // Network failure — log and return tagged error so caller fails-open.
-                println!("[LicenseRust] Dodo validate network error: {}", e);
+                safe_println!("[LicenseRust] Dodo validate network error: {}", e);
                 Ok(format!("ERR:dodo:network:{}", e))
             }
         }
@@ -393,14 +394,14 @@ impl Task for DeactivateDodoTask {
 
                 // 200 = successfully deactivated
                 if status == 200 {
-                    println!("[LicenseRust] Dodo deactivation success (status=200)");
+                    safe_println!("[LicenseRust] Dodo deactivation success (status=200)");
                     return Ok("OK".to_string());
                 }
 
                 // 404 = instance already deactivated or not found — treat as success
                 // (idempotent: if it's already gone, the goal is achieved)
                 if status == 404 {
-                    println!("[LicenseRust] Dodo deactivation: 404 (already deactivated or not found, treating as OK)");
+                    safe_println!("[LicenseRust] Dodo deactivation: 404 (already deactivated or not found, treating as OK)");
                     return Ok("OK".to_string());
                 }
 
@@ -415,14 +416,14 @@ impl Task for DeactivateDodoTask {
                     })
                     .unwrap_or_else(|| format!("HTTP {}", status));
 
-                println!(
+                safe_println!(
                     "[LicenseRust] Dodo deactivation failed: status={}, err={}",
                     status, err
                 );
                 Ok(format!("ERR:dodo:{}", err))
             }
             Err(e) => {
-                println!("[LicenseRust] Dodo deactivate network error: {}", e);
+                safe_println!("[LicenseRust] Dodo deactivate network error: {}", e);
                 Ok(format!("ERR:dodo:network:{}", e))
             }
         }

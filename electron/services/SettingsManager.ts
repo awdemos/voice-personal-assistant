@@ -52,6 +52,9 @@ export interface AppSettings {
     // When true (default) and the active mode is a technical / coding interview, prefer
     // direct vision LLM over structured-extract-then-answer for lowest latency.
     technicalInterviewVisionFirst?: boolean;
+    // Enable LLM reasoning / chain-of-thought. When true, models that support reasoning
+    // will show their thinking process. When false, reasoning is suppressed (default).
+    reasoningEnabled?: boolean;
 }
 
 export const VALID_SCREEN_UNDERSTANDING_MODES = ['vision_first', 'vision_only', 'private_vision'] as const;

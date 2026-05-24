@@ -1,6 +1,7 @@
 // ScreenCaptureKit-based system audio capture
 // Uses cidre 0.11.10 API with correct class registration and inner state
 
+use crate::{safe_println, safe_eprintln};
 use anyhow::Result;
 use cidre::sc::StreamOutput;
 use cidre::{arc, cm, define_obj_type, dispatch, ns, objc, sc};
@@ -94,7 +95,7 @@ impl sc::stream::OutputImpl for AudioHandler {
                 }
             }
             Err(e) => {
-                println!("[SystemAudio-SCK] Failed to get audio buffer: {:?}", e);
+                safe_println!("[SystemAudio-SCK] Failed to get audio buffer: {:?}", e);
             }
         }
     }
@@ -107,14 +108,14 @@ pub struct SpeakerInput {
 
 impl SpeakerInput {
     pub fn new(device_id: Option<String>) -> Result<Self> {
-        println!("[SpeakerInput] Initializing ScreenCaptureKit audio capture...");
+        safe_println!("[SpeakerInput] Initializing ScreenCaptureKit audio capture...");
 
         // ScreenCaptureKit captures ALL system audio, not per-device. If the
         // user picked a non-default output device they should be told that
         // this fallback path silently ignores it.
         if let Some(ref id) = device_id {
             if !id.is_empty() && id != "default" && id != "sck" {
-                eprintln!(
+                safe_eprintln!(
                     "[SpeakerInput] WARNING: ScreenCaptureKit fallback ignores device_id '{}' — will capture global system audio.",
                     id
                 );
@@ -134,7 +135,7 @@ impl SpeakerInput {
 
         sc::ShareableContent::current_with_ch(move |content_opt, error_opt| {
             let result: Result<arc::R<sc::ShareableContent>> = if let Some(e) = error_opt {
-                println!(
+                safe_println!(
                     "[SpeakerInput] ERROR: ScreenCaptureKit access denied: {:?}",
                     e
                 );
@@ -160,7 +161,7 @@ impl SpeakerInput {
                 .map_err(|_| anyhow::anyhow!("SCK wait poisoned"))?;
             slot = s;
             if wait_res.timed_out() {
-                println!("[SpeakerInput] Please grant Screen Recording permission in System Settings > Privacy & Security");
+                safe_println!("[SpeakerInput] Please grant Screen Recording permission in System Settings > Privacy & Security");
                 return Err(anyhow::anyhow!(
                     "ScreenCaptureKit content callback never fired (10s) — likely Screen Recording permission denied"
                 ));
@@ -174,7 +175,7 @@ impl SpeakerInput {
         }
 
         let display = &displays[0];
-        println!(
+        safe_println!(
             "[SpeakerInput] Using display: {}x{}",
             display.width(),
             display.height()
@@ -197,7 +198,7 @@ impl SpeakerInput {
         cfg.set_height(2);
         cfg.set_minimum_frame_interval(cm::Time::new(1, 1)); // 1 FPS
 
-        println!("[SpeakerInput] Config: 48kHz mono, queue_depth=8");
+        safe_println!("[SpeakerInput] Config: 48kHz mono, queue_depth=8");
 
         Ok(Self { cfg, filter })
     }
@@ -231,7 +232,7 @@ impl SpeakerInput {
             ));
         }
 
-        println!("[SpeakerInput] Starting ScreenCaptureKit stream...");
+        safe_println!("[SpeakerInput] Starting ScreenCaptureKit stream...");
 
         use std::sync::{Condvar, Mutex};
 
@@ -242,11 +243,11 @@ impl SpeakerInput {
 
         stream.start_with_ch(move |err| {
             let result = if let Some(e) = err {
-                println!("[SpeakerInput] ERROR: Stream start FAILED: {:?}", e);
-                println!("[SpeakerInput] Check Screen Recording permission in System Settings!");
+                safe_println!("[SpeakerInput] ERROR: Stream start FAILED: {:?}", e);
+                safe_println!("[SpeakerInput] Check Screen Recording permission in System Settings!");
                 Err(anyhow::anyhow!("SCK start failed: {:?}", e))
             } else {
-                println!("[SpeakerInput] ✅ Stream started successfully!");
+                safe_println!("[SpeakerInput] ✅ Stream started successfully!");
                 Ok(())
             };
             let (lock, cvar) = &*pair_clone;
@@ -304,13 +305,13 @@ impl Drop for SpeakerStream {
     fn drop(&mut self) {
         use std::sync::{Arc, Condvar, Mutex};
 
-        println!("[SpeakerStream] Stopping ScreenCaptureKit stream...");
+        safe_println!("[SpeakerStream] Stopping ScreenCaptureKit stream...");
 
         let stop_pair = Arc::new((Mutex::new(false), Condvar::new()));
         let pair_clone = stop_pair.clone();
 
         self.stream.stop_with_ch(move |_| {
-            println!("[SpeakerStream] Stream stopped");
+            safe_println!("[SpeakerStream] Stream stopped");
             let (lock, cvar) = &*pair_clone;
             let mut stopped = lock.lock().unwrap();
             *stopped = true;
@@ -326,7 +327,7 @@ impl Drop for SpeakerStream {
                 .unwrap();
             stopped = result.0;
             if !*stopped {
-                println!("[SpeakerStream] WARNING: Stop callback not received after 2s");
+                safe_println!("[SpeakerStream] WARNING: Stop callback not received after 2s");
             }
         }
     }

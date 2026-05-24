@@ -64,6 +64,7 @@
 
 #![cfg(target_os = "macos")]
 
+use crate::{safe_println, safe_eprintln};
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -264,7 +265,7 @@ unsafe extern "C" fn tap_callback(
     match result {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("[keyboard_tap] callback panicked; passing event through");
+            safe_eprintln!("[keyboard_tap] callback panicked; passing event through");
             event
         }
     }
@@ -291,7 +292,7 @@ fn tap_callback_inner(
         let port = state.port.load(Ordering::Acquire) as CFMachPortRef;
         if !port.is_null() {
             unsafe { CGEventTapEnable(port, true) };
-            eprintln!(
+            safe_eprintln!(
                 "[keyboard_tap] tap was disabled (event_type={:#x}); re-enabled",
                 event_type
             );
@@ -413,7 +414,7 @@ fn tap_callback_inner(
         _ => {
             static UNKNOWN_TYPE_LOGGED: AtomicBool = AtomicBool::new(false);
             if !UNKNOWN_TYPE_LOGGED.swap(true, Ordering::Relaxed) {
-                eprintln!(
+                safe_eprintln!(
                     "[keyboard_tap] unexpected event_type={:#x} from CGEventTap; passing through",
                     event_type
                 );
@@ -501,7 +502,7 @@ fn tap_worker(state: Arc<TapState>) {
         // active flag stays false, JS can re-poll.
         unsafe { Arc::from_raw(user_info as *const TapState) };
         state.active.store(false, Ordering::Release);
-        eprintln!(
+        safe_eprintln!(
             "[keyboard_tap] CGEventTapCreate returned NULL — Accessibility \
              permission likely missing"
         );
@@ -711,11 +712,11 @@ impl StealthKeyboardTap {
             let join_start = std::time::Instant::now();
             match h.join() {
                 Ok(_) => {}
-                Err(e) => eprintln!("[keyboard_tap] worker panicked during cleanup: {:?}", e),
+                Err(e) => safe_eprintln!("[keyboard_tap] worker panicked during cleanup: {:?}", e),
             }
             let join_ms = join_start.elapsed().as_millis();
             if join_ms > 100 {
-                eprintln!(
+                safe_eprintln!(
                     "[keyboard_tap] stop() join() took {}ms — runloop may have been wedged",
                     join_ms
                 );

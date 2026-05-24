@@ -658,6 +658,11 @@ export function initializeIpcHandlers(appState: AppState): void {
     return appState.getWindowHelper().isMainWindowMaximized();
   });
 
+  safeHandle("resize-launcher", async (_event, { width, height }: { width: number; height: number }) => {
+    if (!width || !height) return;
+    appState.getWindowHelper().setLauncherDimensions(width, height);
+  });
+
   // Settings Window
   safeHandle("toggle-settings-window", (event, { x, y } = {}) => {
     appState.settingsWindowHelper.toggleWindow(x, y)
@@ -1058,6 +1063,27 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { success: true };
     } catch (error: any) {
       console.error("Error saving Claude API key:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  safeHandle("set-kimi-api-key", async (_, apiKey: string) => {
+    try {
+      const { CredentialsManager } = require('./services/CredentialsManager');
+      CredentialsManager.getInstance().setKimiApiKey(apiKey);
+
+      // Also update the LLMHelper immediately
+      const llmHelper = appState.processingHelper.getLLMHelper();
+      llmHelper.setKimiApiKey(apiKey);
+
+      // CQ-06 fix: cancel in-flight stream before re-init (engine only, not session)
+      appState.getIntelligenceManager().resetEngine();
+      // Re-init IntelligenceManager
+      appState.getIntelligenceManager().initializeLLMs();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error saving Kimi API key:", error);
       return { success: false, error: error.message };
     }
   });
@@ -1574,6 +1600,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         hasGroqKey: hasKey(creds.groqApiKey),
         hasOpenaiKey: hasKey(creds.openaiApiKey),
         hasClaudeKey: hasKey(creds.claudeApiKey),
+        hasKimiKey: hasKey(creds.kimiApiKey),
         hasNativelyKey: hasKey(creds.nativelyApiKey),
         googleServiceAccountPath: creds.googleServiceAccountPath || null,
         sttProvider: creds.sttProvider || 'none',
@@ -1604,10 +1631,11 @@ export function initializeIpcHandlers(appState: AppState): void {
         groqPreferredModel: creds.groqPreferredModel || undefined,
         openaiPreferredModel: creds.openaiPreferredModel || undefined,
         claudePreferredModel: creds.claudePreferredModel || undefined,
+        kimiPreferredModel: creds.kimiPreferredModel || undefined,
       };
     } catch (error: any) {
       // SECURITY FIX (P0): Error fallback returns masked keys, not raw strings
-      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, hasNativelyKey: false, googleServiceAccountPath: null, sttProvider: 'none', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false, hasDeepgramKey: false, hasElevenLabsKey: false, hasAzureKey: false, azureRegion: 'eastus', hasIbmWatsonKey: false, ibmWatsonRegion: 'us-south', hasSonioxKey: false, hasTavilyKey: false, sttGroqKey: '', sttOpenaiKey: '', sttDeepgramKey: '', sttElevenLabsKey: '', sttAzureKey: '', sttIbmKey: '', sttSonioxKey: '' };
+      return { hasGeminiKey: false, hasGroqKey: false, hasOpenaiKey: false, hasClaudeKey: false, hasKimiKey: false, hasNativelyKey: false, googleServiceAccountPath: null, sttProvider: 'none', groqSttModel: 'whisper-large-v3-turbo', hasSttGroqKey: false, hasSttOpenaiKey: false, hasDeepgramKey: false, hasElevenLabsKey: false, hasAzureKey: false, azureRegion: 'eastus', hasIbmWatsonKey: false, ibmWatsonRegion: 'us-south', hasSonioxKey: false, hasTavilyKey: false, sttGroqKey: '', sttOpenaiKey: '', sttDeepgramKey: '', sttElevenLabsKey: '', sttAzureKey: '', sttIbmKey: '', sttSonioxKey: '' };
     }
   });
 
@@ -1615,7 +1643,7 @@ export function initializeIpcHandlers(appState: AppState): void {
   // Dynamic Model Discovery Handlers
   // ==========================================
 
-  safeHandle("fetch-provider-models", async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude', apiKey: string) => {
+  safeHandle("fetch-provider-models", async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'kimi', apiKey: string) => {
     try {
       // Fall back to stored key if no key was explicitly provided
       let key = apiKey?.trim();
@@ -1626,6 +1654,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         else if (provider === 'groq') key = cm.getGroqApiKey();
         else if (provider === 'openai') key = cm.getOpenaiApiKey();
         else if (provider === 'claude') key = cm.getClaudeApiKey();
+        else if (provider === 'kimi') key = cm.getKimiApiKey();
       }
 
       if (!key) {
@@ -1642,7 +1671,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     }
   });
 
-  safeHandle("set-provider-preferred-model", async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude', modelId: string) => {
+  safeHandle("set-provider-preferred-model", async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'kimi', modelId: string) => {
     try {
       const { CredentialsManager } = require('./services/CredentialsManager');
       CredentialsManager.getInstance().setPreferredModel(provider, modelId);
@@ -2190,7 +2219,7 @@ export function initializeIpcHandlers(appState: AppState): void {
     return detectHardware();
   });
 
-  safeHandle("test-llm-connection", async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude', apiKey?: string) => {
+  safeHandle("test-llm-connection", async (_, provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'kimi', apiKey?: string) => {
     console.log(`[IPC] Received test-llm-connection request for provider: ${provider}`);
     try {
       if (!apiKey || !apiKey.trim()) {
@@ -2200,6 +2229,7 @@ export function initializeIpcHandlers(appState: AppState): void {
         else if (provider === 'groq') apiKey = creds.getGroqApiKey();
         else if (provider === 'openai') apiKey = creds.getOpenaiApiKey();
         else if (provider === 'claude') apiKey = creds.getClaudeApiKey();
+        else if (provider === 'kimi') apiKey = creds.getKimiApiKey();
       }
 
       if (!apiKey || !apiKey.trim()) {
@@ -2244,6 +2274,14 @@ export function initializeIpcHandlers(appState: AppState): void {
             'anthropic-version': '2023-06-01',
             'content-type': 'application/json'
           },
+          timeout: 15000
+        });
+      } else if (provider === 'kimi') {
+        response = await axios.post('https://api.moonshot.cn/v1/chat/completions', {
+            model: "kimi-k2.6-fast",
+          messages: [{ role: "user", content: "Hello" }]
+        }, {
+          headers: { Authorization: `Bearer ${apiKey}` },
           timeout: 15000
         });
       }
@@ -2417,7 +2455,7 @@ export function initializeIpcHandlers(appState: AppState): void {
       return { model: cm.getDefaultModel() };
     } catch (error: any) {
       console.error("Error getting default model:", error);
-      return { model: 'gemini-3.1-flash-lite-preview' };
+            return { model: 'kimi-k2.6-fast' };
     }
   });
 
@@ -3689,6 +3727,23 @@ export function initializeIpcHandlers(appState: AppState): void {
       return false
     }
   })
+
+  // ── Reasoning Toggle ─────────────────────────────────────────
+  safeHandle("get-reasoning-enabled", async () => {
+    const { SettingsManager } = require('./services/SettingsManager');
+    return SettingsManager.getInstance().get('reasoningEnabled') ?? false;
+  });
+
+  safeHandle("set-reasoning-enabled", async (_, enabled: boolean) => {
+    const { SettingsManager } = require('./services/SettingsManager');
+    SettingsManager.getInstance().set('reasoningEnabled', !!enabled);
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (!win.isDestroyed()) {
+        win.webContents.send('reasoning-enabled-changed', !!enabled);
+      }
+    });
+    return { success: true };
+  });
 
   // ==========================================
   // Modes IPC Handlers

@@ -27,6 +27,7 @@ export interface StoredCredentials {
     groqApiKey?: string;
     openaiApiKey?: string;
     claudeApiKey?: string;
+    kimiApiKey?: string;
     googleServiceAccountPath?: string;
     customProviders?: CustomProvider[];
     curlProviders?: CurlProvider[];
@@ -56,6 +57,7 @@ export interface StoredCredentials {
     groqPreferredModel?: string;
     openaiPreferredModel?: string;
     claudePreferredModel?: string;
+    kimiPreferredModel?: string;
     // Free trial state
     trialToken?: string;   // server-issued signed token (natively_trial_…)
     trialExpiresAt?: string;   // ISO timestamp — local copy for startup check
@@ -107,6 +109,10 @@ export class CredentialsManager {
         return this.credentials.claudeApiKey;
     }
 
+    public getKimiApiKey(): string | undefined {
+        return this.credentials.kimiApiKey || process.env.KIMI_API_KEY;
+    }
+
     public getGoogleServiceAccountPath(): string | undefined {
         return this.credentials.googleServiceAccountPath;
     }
@@ -116,6 +122,12 @@ export class CredentialsManager {
     }
 
     public getSttProvider(): 'none' | 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox' | 'natively' | 'local-whisper' {
+        // Allow STT_PROVIDER env var to override stored credentials for easy switching
+        const envProvider = process.env.STT_PROVIDER as 'none' | 'google' | 'groq' | 'openai' | 'deepgram' | 'elevenlabs' | 'azure' | 'ibmwatson' | 'soniox' | 'natively' | 'local-whisper' | undefined;
+        if (envProvider) {
+            return envProvider;
+        }
+
         const provider = this.credentials.sttProvider || 'none';
         // Self-heal: if provider is 'none' but a Natively key exists, the user is in a
         // broken state (key cleared then re-entered via a path that skipped auto-promote,
@@ -150,7 +162,7 @@ export class CredentialsManager {
     }
 
     public getElevenLabsApiKey(): string | undefined {
-        return this.credentials.elevenLabsApiKey;
+        return this.credentials.elevenLabsApiKey || process.env.ELEVENLABS_API_KEY;
     }
 
     public getAzureApiKey(): string | undefined {
@@ -185,7 +197,7 @@ export class CredentialsManager {
         return this.credentials.aiResponseLanguage || 'auto';
     }
     public getDefaultModel(): string {
-        return this.credentials.defaultModel || 'gemini-3.1-flash-lite-preview';
+        return this.credentials.defaultModel || 'kimi-k2.6';
     }
 
     public getNativelyApiKey(): string | undefined {
@@ -210,6 +222,7 @@ export class CredentialsManager {
         if (this.credentials.claudeApiKey) return true;          // Claude vision
         if (this.credentials.geminiApiKey) return true;          // Gemini vision
         if (this.credentials.groqApiKey) return true;            // Groq llama-4-scout vision
+        if (this.credentials.kimiApiKey) return true;            // Kimi vision
         // Custom providers: only count if they have screenshots scope AND multimodal flag
         const custom = this.credentials.customProviders || [];
         if (custom.some(p => (p as any)?.multimodal === true)) return true;
@@ -257,7 +270,13 @@ export class CredentialsManager {
     public setClaudeApiKey(key: string): void {
         this.credentials.claudeApiKey = key;
         this.saveCredentials();
-        console.log('[CredentialsManager] Claude API Key updated');
+        console.log("[CredentialsManager] Claude API Key updated");
+    }
+
+    public setKimiApiKey(key: string): void {
+        this.credentials.kimiApiKey = key;
+        this.saveCredentials();
+        console.log("[CredentialsManager] Kimi API Key updated");
     }
 
     public setGoogleServiceAccountPath(filePath: string): void {
@@ -370,13 +389,13 @@ export class CredentialsManager {
         this.credentials.nativelyApiKey = trimmed || undefined;
 
         if (trimmed) {
-            // Auto-promote natively to default model unless user already chose a non-Gemini/Groq model
             const current = this.credentials.defaultModel || '';
             const isAutoDefault = !current
                 || current.startsWith('gemini-')
                 || current.startsWith('llama-')
                 || current.startsWith('mixtral-')
                 || current.startsWith('gemma-')
+                || current.startsWith('kimi-')
                 || current === 'gemini'
                 || current === 'llama';
             if (isAutoDefault) {
@@ -384,16 +403,14 @@ export class CredentialsManager {
                 console.log('[CredentialsManager] Auto-set default model to natively');
             }
 
-            // Auto-promote natively STT if still on 'none' or the default Google STT
             if (!this.credentials.sttProvider || this.credentials.sttProvider === 'none' || this.credentials.sttProvider === 'google') {
                 this.credentials.sttProvider = 'natively';
                 console.log('[CredentialsManager] Auto-set STT provider to natively');
             }
         } else {
-            // Key cleared — revert natively-auto-set defaults back to safe fallbacks
             if (this.credentials.defaultModel === 'natively') {
-                this.credentials.defaultModel = 'gemini-3.1-flash-lite-preview';
-                console.log('[CredentialsManager] Natively key cleared — reset default model to Gemini Flash');
+                this.credentials.defaultModel = 'kimi-k2.6';
+                console.log('[CredentialsManager] Natively key cleared — reset default model to Kimi K2.5');
             }
             if (this.credentials.sttProvider === 'natively') {
                 this.credentials.sttProvider = 'none';
@@ -405,12 +422,12 @@ export class CredentialsManager {
         console.log('[CredentialsManager] Natively API Key updated');
     }
 
-    public getPreferredModel(provider: 'gemini' | 'groq' | 'openai' | 'claude'): string | undefined {
+    public getPreferredModel(provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'kimi'): string | undefined {
         const key = `${provider}PreferredModel` as keyof StoredCredentials;
         return this.credentials[key] as string | undefined;
     }
 
-    public setPreferredModel(provider: 'gemini' | 'groq' | 'openai' | 'claude', modelId: string): void {
+    public setPreferredModel(provider: 'gemini' | 'groq' | 'openai' | 'claude' | 'kimi', modelId: string): void {
         const key = `${provider}PreferredModel` as keyof StoredCredentials;
         (this.credentials as any)[key] = modelId;
         this.saveCredentials();

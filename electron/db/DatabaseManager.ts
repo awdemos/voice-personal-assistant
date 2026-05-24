@@ -994,6 +994,11 @@ export class DatabaseManager {
         });
 
         const runTransaction = this.db.transaction(() => {
+            // 0. Delete existing transcripts and interactions for this meeting
+            // to prevent duplication when saveMeeting is called multiple times.
+            this.db.prepare(`DELETE FROM transcripts WHERE meeting_id = ?`).run(meeting.id);
+            this.db.prepare(`DELETE FROM ai_interactions WHERE meeting_id = ?`).run(meeting.id);
+
             // 1. Insert Meeting
             insertMeeting.run(
                 meeting.id,

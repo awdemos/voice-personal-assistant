@@ -1198,6 +1198,38 @@ a,
   cursor: default !important;
 }
 
+/* ─── Launcher resize handle ───────────────────────────────────────────────
+   Frameless windows on Linux/Windows have no native resize borders.
+   This corner grip lets users resize by dragging bottom-right.
+   The cursor override MUST beat the global cursor lock above. ────────────── */
+.launcher-resize-handle {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  z-index: 9999;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 2px;
+  color: var(--text-tertiary, #94a3b8);
+  cursor: se-resize !important;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.launcher-resize-handle:hover {
+  color: var(--accent-primary, #34d399);
+}
+
+/* ─── Linux window border for visual edge ──────────────────────────────────
+   Frameless windows on Linux can blend into the background.
+   A 1px subtle border gives the window definition. ──────────────────────── */
+html[data-platform="linux"] body {
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.08));
+}
+
 /* Restore keyboard focus rings that Tailwind preflight removes */
 *:focus-visible {
   outline: 2px solid var(--accent-primary);

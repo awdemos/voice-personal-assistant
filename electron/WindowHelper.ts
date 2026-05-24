@@ -156,6 +156,33 @@ export class WindowHelper {
     this.overlayBounds = this.overlayWindow.getBounds()
   }
 
+  /**
+   * Resize the launcher window from the renderer (client-side resize handle).
+   * Keeps the top-left corner fixed so the user drags from bottom-right.
+   */
+  public setLauncherDimensions(width: number, height: number): void {
+    if (!this.launcherWindow || this.launcherWindow.isDestroyed()) return
+
+    const currentBounds = this.launcherWindow.getBounds()
+    const workArea = this.getDisplayWorkArea(currentBounds)
+    const maxAllowedWidth = Math.floor(workArea.width * 0.95)
+    const maxAllowedHeight = Math.floor(workArea.height * 0.95)
+    const minWidth = 600
+    const minHeight = 400
+
+    const newWidth = Math.min(Math.max(width, minWidth), maxAllowedWidth)
+    const newHeight = Math.min(Math.max(height, minHeight), maxAllowedHeight)
+
+    this.launcherWindow.setBounds({
+      x: currentBounds.x,
+      y: currentBounds.y,
+      width: newWidth,
+      height: newHeight,
+    })
+
+    this.launcherSize = { width: newWidth, height: newHeight }
+  }
+
   public createWindow(): void {
     if (this.launcherWindow !== null) return // Already created
 
@@ -364,6 +391,9 @@ export class WindowHelper {
       // visibleOnFullScreen above; Windows has no equivalent flag, so the level
       // itself is what controls fullscreen visibility. See issue #167.
       this.overlayWindow.setAlwaysOnTop(true, "screen-saver")
+    } else if (process.platform === "linux") {
+      // Linux/Wayland: ensure overlay stays visible above other windows
+      this.overlayWindow.setAlwaysOnTop(true, "floating")
     }
 
     this.overlayWindow.loadURL(`${startUrl}?window=overlay`).catch(e => {
@@ -532,8 +562,9 @@ export class WindowHelper {
     // Set opacity to 0 immediately so the window vanishes without triggering
     // the macOS hide animation (same pattern as switchToLauncher / switchToOverlay).
     // This prevents the brief black/white frame flash before screenshots.
-    this.launcherWindow?.setOpacity(0);
-    this.overlayWindow?.setOpacity(0);
+    // NOTE: On Linux/Wayland setOpacity can throw if the compositor doesn't support it.
+    try { this.launcherWindow?.setOpacity(0); } catch (e) { /* noop */ }
+    try { this.overlayWindow?.setOpacity(0); } catch (e) { /* noop */ }
     this.launcherWindow?.hide()
     this.overlayWindow?.hide()
     this.isWindowVisible = false
@@ -572,7 +603,7 @@ export class WindowHelper {
     if (!this.overlayWindow || this.overlayWindow.isDestroyed()) return;
 
     // Restore opacity in case it was zeroed by hideMainWindow() before a screenshot.
-    this.overlayWindow.setOpacity(1);
+    try { this.overlayWindow.setOpacity(1); } catch (e) { /* noop */ }
 
     // Re-assert z-order on Windows before showing — same DWM demotion risk as
     // switchToOverlay(). Must come before show()/showInactive() so the window
@@ -680,7 +711,7 @@ export class WindowHelper {
       // Restore opacity before showing (it may have been zeroed by hideMainWindow).
       if (process.platform === 'win32' && this.contentProtection) {
         // Opacity Shield: Show at 0 opacity first to prevent frame leak
-        this.overlayWindow.setOpacity(0);
+        try { this.overlayWindow.setOpacity(0); } catch (e) { /* noop */ }
         if (inactive) this.overlayWindow.showInactive(); else this.overlayWindow.show();
         this.overlayWindow.setContentProtection(true);
         // Small delay to ensure Windows DWM processes the flag before making it opaque
@@ -688,7 +719,7 @@ export class WindowHelper {
         if (this.opacityTimeout) clearTimeout(this.opacityTimeout);
         this.opacityTimeout = setTimeout(() => {
           if (this.overlayWindow && !this.overlayWindow.isDestroyed()) {
-            this.overlayWindow.setOpacity(1);
+            try { this.overlayWindow.setOpacity(1); } catch (e) { /* noop */ }
             // Re-assert z-order on Windows — DWM can silently demote the HWND after hide/show
             this.overlayWindow.setAlwaysOnTop(true, 'screen-saver');
             if (!inactive) this.overlayWindow.focus();
@@ -696,7 +727,8 @@ export class WindowHelper {
         }, 60);
       } else {
         // Restore opacity (may have been zeroed pre-screenshot by hideMainWindow)
-        this.overlayWindow.setOpacity(1);
+        // NOTE: On Linux/Wayland setOpacity can throw if the compositor doesn't support it.
+        try { this.overlayWindow.setOpacity(1); } catch (e) { /* noop */ }
         this.overlayWindow.setContentProtection(this.contentProtection);
         // Re-assert z-order BEFORE show on Windows — DWM processes setAlwaysOnTop
         // synchronously, so calling it before show() ensures the window lands at the
@@ -729,20 +761,21 @@ export class WindowHelper {
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
       if (process.platform === 'win32' && this.contentProtection) {
         // Opacity Shield: Show at 0 opacity first
-        this.launcherWindow.setOpacity(0);
+        try { this.launcherWindow.setOpacity(0); } catch (e) { /* noop */ }
         if (inactive) this.launcherWindow.showInactive(); else this.launcherWindow.show();
         this.launcherWindow.setContentProtection(true);
 
         if (this.opacityTimeout) clearTimeout(this.opacityTimeout);
         this.opacityTimeout = setTimeout(() => {
           if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
-            this.launcherWindow.setOpacity(1);
+            try { this.launcherWindow.setOpacity(1); } catch (e) { /* noop */ }
             if (!inactive) this.launcherWindow.focus();
           }
         }, 60);
       } else {
         // Restore opacity (may have been zeroed pre-screenshot by hideMainWindow)
-        this.launcherWindow.setOpacity(1);
+        // NOTE: On Linux/Wayland setOpacity can throw if the compositor doesn't support it.
+        try { this.launcherWindow.setOpacity(1); } catch (e) { /* noop */ }
         this.launcherWindow.setContentProtection(this.contentProtection);
         if (inactive) this.launcherWindow.showInactive(); else this.launcherWindow.show();
         if (!inactive) this.launcherWindow.focus();

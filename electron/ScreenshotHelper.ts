@@ -591,12 +591,13 @@ export class ScreenshotHelper {
     if (!outputPath.startsWith(userDataDir)) {
       throw new Error(`[ScreenshotHelper] Refusing shell command for path outside userData: ${outputPath}`);
     }
-    const safePath = outputPath.replace(/"/g, '\\"');
+    // Escape for single-quoted shell strings: replace ' with '\''
+    const safePath = outputPath.replace(/'/g, "'\\''");
     const platform = process.platform;
     if (platform === 'linux') {
       return interactive
-        ? `gnome-screenshot -a -f "${safePath}" 2>/dev/null || scrot -s "${safePath}" 2>/dev/null || import "${safePath}"`
-        : `gnome-screenshot -f "${safePath}" 2>/dev/null || scrot "${safePath}" 2>/dev/null || import -window root "${safePath}"`;
+        ? `grim -g "$(slurp)" '${safePath}' 2>/dev/null || gnome-screenshot -a -f '${safePath}' 2>/dev/null || scrot -s '${safePath}' 2>/dev/null || import '${safePath}'`
+        : `grim '${safePath}' 2>/dev/null || gnome-screenshot -f '${safePath}' 2>/dev/null || scrot '${safePath}' 2>/dev/null || import -window root '${safePath}'`;
     }
     throw new Error(`Unsupported platform for screenshots: ${platform}`);
   }
@@ -615,7 +616,7 @@ export class ScreenshotHelper {
         } else if (process.platform === 'win32') {
           await this.captureWithDesktopCapturer(screenshotPath);
         } else {
-          await shellExecAsync(this.getScreenshotCommand(screenshotPath, false))
+          await util.promisify(execShell)(this.getScreenshotCommand(screenshotPath, false), { timeout: 30_000, killSignal: 'SIGKILL' })
         }
 
         this.screenshotQueue.push(screenshotPath)
@@ -685,7 +686,7 @@ export class ScreenshotHelper {
         // Linux: use interactive selection command
         console.log('[ScreenshotHelper] Using interactive selection');
         try {
-          await shellExecAsync(this.getScreenshotCommand(screenshotPath, true))
+          await util.promisify(execShell)(this.getScreenshotCommand(screenshotPath, true), { timeout: 60_000, killSignal: 'SIGKILL' })
         } catch (e: any) {
           console.warn('[ScreenshotHelper] User cancelled selection or error occurred:', e);
           throw new Error("Selection cancelled")

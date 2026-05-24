@@ -168,12 +168,12 @@ test('active mode prompt suffix strips shared prompt prelude exactly once', () =
 
   const suffix = ModesManager.getInstance().getActiveModeSystemPromptSuffix();
 
-  assert.ok(suffix.includes('<mode_definition>'));
+  assert.ok(suffix.includes('MODE:'));
   assert.ok(suffix.includes('deal'));
   assert.ok(suffix.includes('objection'));
   assert.ok(!suffix.startsWith(promptsMod.SHARED_MODE_PREFIX));
   assert.ok(!suffix.startsWith(promptsMod.SHARED_MODE_PREFIX_SHORT));
-  assert.equal((suffix.match(/<core_identity>/g) ?? []).length, 0);
+  assert.equal((suffix.match(/## Security/g) ?? []).length, 0);
 });
 
 test('active mode context includes custom instructions and only active-mode reference files', () => {

@@ -33,8 +33,10 @@ export class VectorStore {
     private worker: Worker | null = null;
     private requestId = 0;
     private pendingRequests = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void; timer: ReturnType<typeof setTimeout> }>();
+    private _terminating = false; // true while we are intentionally shutting down the worker
 
     private static readonly WORKER_TIMEOUT_MS = 30_000; // 30s deadman switch
+    private static readonly WORKER_RETRY_MAX = 1;       // one immediate retry on unexpected worker exit
 
     constructor(db: Database.Database, dbPath: string, extPath: string) {
         this.db = db;
@@ -66,17 +68,30 @@ export class VectorStore {
                 }
             });
 
+            // Pipe worker stderr into main-process logs so crashes are visible
+            this.worker.stderr?.on('data', (data: Buffer) => {
+                const text = data.toString('utf8').trim();
+                if (text) console.error('[vectorSearchWorker stderr]', text);
+            });
+
             this.worker.on('error', (err) => {
                 console.error('[VectorStore] Worker error:', err);
                 this.rejectAllPending(err);
             });
 
             this.worker.on('exit', (code) => {
-                if (code !== 0) {
-                    console.warn(`[VectorStore] Worker exited with code ${code}`);
-                }
+                const wasTerminating = this._terminating;
+                this._terminating = false;
                 this.worker = null;
-                this.rejectAllPending(new Error(`Worker exited with code ${code}`));
+
+                if (code !== 0 && !wasTerminating) {
+                    console.warn(`[VectorStore] Worker crashed with exit code ${code}`);
+                    this.rejectAllPending(new Error(`Worker crashed with exit code ${code}`));
+                } else if (code !== 0) {
+                    console.log(`[VectorStore] Worker terminated gracefully (exit code ${code})`);
+                } else {
+                    console.log(`[VectorStore] Worker exited cleanly`);
+                }
             });
         }
         return this.worker;
@@ -96,22 +111,43 @@ export class VectorStore {
     /**
      * Send a message to the worker with Transferable buffers.
      * Returns a Promise with a timeout deadman switch.
+     * If the worker dies mid-request, we retry once after recreating it.
      */
-    private postToWorker<T>(message: any, transferList: ArrayBuffer[] = []): Promise<T> {
-        // Safe requestId wrap-around
-        this.requestId = (this.requestId + 1) % Number.MAX_SAFE_INTEGER;
-        const id = this.requestId;
-        message.requestId = id;
+    private async postToWorker<T>(message: any, transferList: ArrayBuffer[] = []): Promise<T> {
+        let lastError: Error | undefined;
+        for (let attempt = 0; attempt <= VectorStore.WORKER_RETRY_MAX; attempt++) {
+            // Safe requestId wrap-around
+            this.requestId = (this.requestId + 1) % Number.MAX_SAFE_INTEGER;
+            const id = this.requestId;
+            message.requestId = id;
 
-        return new Promise<T>((resolve, reject) => {
-            const timer = setTimeout(() => {
-                this.pendingRequests.delete(id);
-                reject(new Error(`[VectorStore] Worker request ${id} timed out after ${VectorStore.WORKER_TIMEOUT_MS}ms`));
-            }, VectorStore.WORKER_TIMEOUT_MS);
+            try {
+                return await new Promise<T>((resolve, reject) => {
+                    const timer = setTimeout(() => {
+                        this.pendingRequests.delete(id);
+                        reject(new Error(`[VectorStore] Worker request ${id} timed out after ${VectorStore.WORKER_TIMEOUT_MS}ms`));
+                    }, VectorStore.WORKER_TIMEOUT_MS);
 
-            this.pendingRequests.set(id, { resolve, reject, timer });
-            this.getWorker().postMessage(message, transferList);
-        });
+                    this.pendingRequests.set(id, { resolve, reject, timer });
+                    try {
+                        this.getWorker().postMessage(message, transferList);
+                    } catch (postErr: any) {
+                        clearTimeout(timer);
+                        this.pendingRequests.delete(id);
+                        reject(postErr);
+                    }
+                });
+            } catch (err: any) {
+                lastError = err;
+                const retryable = err.message?.includes('Worker crashed') || err.message?.includes('Worker exited');
+                if (!retryable || attempt >= VectorStore.WORKER_RETRY_MAX) {
+                    throw err;
+                }
+                console.warn(`[VectorStore] Worker request failed (attempt ${attempt + 1}), retrying with fresh worker...`);
+                // Worker is already nulled by the exit handler; next getWorker() will spawn a new one
+            }
+        }
+        throw lastError || new Error('Worker request failed after retries');
     }
 
     /**
@@ -119,6 +155,7 @@ export class VectorStore {
      */
     async destroy(): Promise<void> {
         if (this.worker) {
+            this._terminating = true;
             await this.worker.terminate();
             this.worker = null;
         }

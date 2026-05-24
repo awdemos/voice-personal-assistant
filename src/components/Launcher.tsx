@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ToggleLeft, ToggleRight, Search, Calendar, ArrowRight, ArrowLeft, MoreHorizontal, Globe, Clock, ChevronRight, Settings, LayoutGrid, RefreshCw, Eye, EyeOff, Ghost, Plus, Mail, Link as LinkIcon, ChevronDown, Trash2, Bell, Check, Download, DownloadCloud, CheckCircle, AlertCircle, User, UserSearch } from 'lucide-react';
 import { generateMeetingPDF } from '../utils/pdfGenerator';
 import icon from "./icon.png";
@@ -13,7 +13,7 @@ import { FeatureSpotlight } from './FeatureSpotlight';
 import { analytics } from '../lib/analytics/analytics.service'; // Added analytics import
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useResolvedTheme } from '../hooks/useResolvedTheme';
-import { isMac } from '../utils/platformUtils';
+import { isMac, isLinux } from '../utils/platformUtils';
 import WindowControls from './WindowControls';
 
 interface Meeting {
@@ -94,6 +94,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
 
     const [showModesOnboarding, setShowModesOnboarding] = useState(false);
     const [showProfileOnboarding, setShowProfileOnboarding] = useState(false);
+    const resizeStartRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
 
     const fetchMeetings = () => {
         if (window.electronAPI && window.electronAPI.getRecentMeetings) {
@@ -252,6 +253,34 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
         return <div className="text-white p-10">Error: Electron API not initialized. Check preload script.</div>;
     }
 
+    const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        resizeStartRef.current = {
+            x: e.clientX,
+            y: e.clientY,
+            w: window.innerWidth,
+            h: window.innerHeight,
+        };
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            if (!resizeStartRef.current) return;
+            const deltaX = moveEvent.clientX - resizeStartRef.current.x;
+            const deltaY = moveEvent.clientY - resizeStartRef.current.y;
+            const newW = Math.max(600, resizeStartRef.current.w + deltaX);
+            const newH = Math.max(400, resizeStartRef.current.h + deltaY);
+            window.electronAPI?.resizeLauncherWindow?.({ width: newW, height: newH });
+        };
+
+        const handleMouseUp = () => {
+            resizeStartRef.current = null;
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+    }, []);
+
     const toggleDetectable = () => {
         const newState = !isDetectable;
         setIsDetectable(newState);
@@ -283,6 +312,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
     const [forwardMeeting, setForwardMeeting] = useState<Meeting | null>(null);
     const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
     const [menuEntered, setMenuEntered] = useState(false);
+    const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
 
     useEffect(() => {
         setMenuEntered(false);
@@ -364,7 +394,7 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
     };
 
     return (
-        <div className="h-full w-full flex flex-col bg-bg-primary text-text-primary font-sans overflow-hidden selection:bg-accent-secondary/30">
+        <div className="h-full w-full flex flex-col bg-bg-primary text-text-primary font-sans overflow-hidden selection:bg-accent-secondary/30 relative">
             {/* 1. Header (Static) */}
             <header className="relative w-full h-[40px] shrink-0 flex items-center justify-between pl-0 drag-region select-none bg-bg-secondary border-b border-border-subtle z-[200]">
                 {/* Left: Spacing for Traffic Lights + Navigation Arrows */}
@@ -1074,6 +1104,8 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
                                                                     className="p-1.5 text-text-secondary hover:text-text-primary transition-colors"
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
+                                                                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                                                        setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
                                                                         setActiveMenuId(activeMenuId === m.id ? null : m.id);
                                                                     }}
                                                                 >
@@ -1089,7 +1121,8 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
                                                                         animate={{ opacity: 1, scale: 1, y: 0 }}
                                                                         exit={{ opacity: 0, scale: 0.95, y: 5 }}
                                                                         transition={{ duration: 0.1 }}
-                                                                        className={`absolute right-0 top-full mt-1 w-[90px] backdrop-blur-xl rounded-lg shadow-2xl z-50 overflow-hidden border ${isLight ? 'bg-bg-elevated border-border-muted shadow-[0_8px_24px_rgba(0,0,0,0.12)]' : 'bg-[#1E1E1E]/80 border-white/10'}`}
+                                                                        className={`fixed w-[90px] backdrop-blur-xl rounded-lg shadow-2xl z-[300] overflow-hidden border ${isLight ? 'bg-bg-elevated border-border-muted shadow-[0_8px_24px_rgba(0,0,0,0.12)]' : 'bg-[#1E1E1E]/80 border-white/10'}`}
+                                                                        style={{ top: menuPos?.top ?? 0, right: menuPos?.right ?? 0 }}
                                                                         onClick={(e) => e.stopPropagation()}
                                                                         onMouseEnter={() => setMenuEntered(true)}
                                                                         onMouseLeave={() => {
@@ -1200,6 +1233,19 @@ const Launcher: React.FC<LauncherProps> = ({ onStartMeeting, onOpenSettings, onO
                 }}
                 initialQuery={submittedGlobalQuery}
             />
+
+            {/* Resize grip for frameless platforms (Linux, Windows) */}
+            {!isMac && (
+                <div
+                    className="launcher-resize-handle"
+                    onMouseDown={handleResizeMouseDown}
+                    title="Resize window"
+                >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M8 12L12 8M4 12L12 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+                    </svg>
+                </div>
+            )}
         </div >
     );
 };

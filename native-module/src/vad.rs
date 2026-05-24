@@ -9,6 +9,7 @@
 // - Detecting utterance boundaries
 // - Optional stream management (not used currently)
 
+use crate::{safe_println, safe_eprintln};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::audio_config::{VAD_START_RMS, VAD_END_RMS, VAD_HANGOVER_MS};
@@ -55,7 +56,7 @@ impl VadIndicator {
             VadState::Idle => {
                 if rms > self.start_threshold {
                     self.state = VadState::Speech;
-                    println!("[VAD-UI] Speech detected (RMS: {})", rms as i32);
+                    safe_println!("[VAD-UI] Speech detected (RMS: {})", rms as i32);
                 }
             }
             VadState::Speech => {
@@ -71,7 +72,7 @@ impl VadIndicator {
                     let time_in_hangover = now - self.hangover_start_time;
                     if time_in_hangover > self.hangover_duration_ms {
                         self.state = VadState::Idle;
-                        println!("[VAD-UI] Speech ended");
+                        safe_println!("[VAD-UI] Speech ended");
                     }
                 }
             }

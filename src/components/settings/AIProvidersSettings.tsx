@@ -116,6 +116,7 @@ export const AIProvidersSettings: React.FC = () => {
     const [groqApiKey, setGroqApiKey] = useState('');
     const [openaiApiKey, setOpenaiApiKey] = useState('');
     const [claudeApiKey, setClaudeApiKey] = useState('');
+    const [kimiApiKey, setKimiApiKey] = useState('');
 
     // Status
     const [savedStatus, setSavedStatus] = useState<Record<string, boolean>>({});
@@ -144,8 +145,7 @@ export const AIProvidersSettings: React.FC = () => {
     const [codexCliStatus, setCodexCliStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
     const [codexCliError, setCodexCliError] = useState('');
 
-    // --- Default Model ---
-    const [defaultModel, setDefaultModel] = useState<string>('gemini-3.1-flash-lite-preview');
+    const [defaultModel, setDefaultModel] = useState<string>('kimi-k2.5');
     const [fastResponseMode, setFastResponseMode] = useState(false);
     const [credentialsLoaded, setCredentialsLoaded] = useState(false);
     const canUseFastMode = !!(hasStoredKey.groq || hasStoredKey.natively || codexCliConfig.enabled);
@@ -169,14 +169,15 @@ export const AIProvidersSettings: React.FC = () => {
                         groq: creds.hasGroqKey,
                         openai: creds.hasOpenaiKey,
                         claude: creds.hasClaudeKey,
+                        kimi: creds.hasKimiKey,
                         natively: creds.hasNativelyKey || false
                     });
-                    // Load preferred models
                     const pm: Record<string, string> = {};
                     if (creds.geminiPreferredModel) pm.gemini = creds.geminiPreferredModel;
                     if (creds.groqPreferredModel) pm.groq = creds.groqPreferredModel;
                     if (creds.openaiPreferredModel) pm.openai = creds.openaiPreferredModel;
                     if (creds.claudePreferredModel) pm.claude = creds.claudePreferredModel;
+                    if (creds.kimiPreferredModel) pm.kimi = creds.kimiPreferredModel;
                     setPreferredModels(pm);
                 }
 
@@ -347,14 +348,11 @@ export const AIProvidersSettings: React.FC = () => {
         setSavingStatus(prev => ({ ...prev, [provider]: true }));
         try {
             let result;
-            // @ts-ignore
             if (provider === 'gemini') result = await window.electronAPI.setGeminiApiKey(key);
-            // @ts-ignore
             if (provider === 'groq') result = await window.electronAPI.setGroqApiKey(key);
-            // @ts-ignore
             if (provider === 'openai') result = await window.electronAPI.setOpenaiApiKey(key);
-            // @ts-ignore
             if (provider === 'claude') result = await window.electronAPI.setClaudeApiKey(key);
+            if (provider === 'kimi') result = await window.electronAPI.setKimiApiKey(key);
 
             if (result && result.success) {
                 setSavedStatus(prev => ({ ...prev, [provider]: true }));
@@ -373,14 +371,11 @@ export const AIProvidersSettings: React.FC = () => {
         if (!confirm(`Are you sure you want to remove the ${provider} API key?`)) return;
         try {
             let result;
-            // @ts-ignore
             if (provider === 'gemini') result = await window.electronAPI.setGeminiApiKey('');
-            // @ts-ignore
             if (provider === 'groq') result = await window.electronAPI.setGroqApiKey('');
-            // @ts-ignore
             if (provider === 'openai') result = await window.electronAPI.setOpenaiApiKey('');
-            // @ts-ignore
             if (provider === 'claude') result = await window.electronAPI.setClaudeApiKey('');
+            if (provider === 'kimi') result = await window.electronAPI.setKimiApiKey('');
 
             if (result && result.success) {
                 setHasStoredKey(prev => ({ ...prev, [provider]: false }));
@@ -420,9 +415,9 @@ export const AIProvidersSettings: React.FC = () => {
             gemini: 'https://aistudio.google.com/app/apikey',
             groq: 'https://console.groq.com/keys',
             openai: 'https://platform.openai.com/api-keys',
-            claude: 'https://console.anthropic.com/settings/keys'
+            claude: 'https://console.anthropic.com/settings/keys',
+            kimi: 'https://platform.moonshot.cn/console/api-keys'
         };
-        // @ts-ignore
         window.electronAPI?.openExternal(urls[provider]);
     };
 
@@ -598,7 +593,25 @@ export const AIProvidersSettings: React.FC = () => {
 
                 <div className="space-y-4">
 
-                    {/* Gemini */}
+                    <ProviderCard
+                        providerId="kimi"
+                        providerName="Kimi"
+                        apiKey={kimiApiKey}
+                        preferredModel={preferredModels.kimi}
+                        hasStoredKey={!!hasStoredKey.kimi}
+                        onKeyChange={setKimiApiKey}
+                        onSaveKey={async () => { await handleSaveKey('kimi', kimiApiKey, setKimiApiKey); }}
+                        onRemoveKey={() => handleRemoveKey('kimi', setKimiApiKey)}
+                        onTestConnection={() => handleTestConnection('kimi', kimiApiKey)}
+                        testStatus={testStatus.kimi || 'idle'}
+                        testError={testError.kimi}
+                        savingStatus={!!savingStatus.kimi}
+                        savedStatus={!!savedStatus.kimi}
+                        keyPlaceholder="sk-..."
+                        keyUrl="https://platform.moonshot.cn/console/api-keys"
+                        onPreferredModelChange={(model) => setPreferredModels(prev => ({ ...prev, kimi: model }))}
+                    />
+
                     <ProviderCard
                         providerId="gemini"
                         providerName="Gemini"

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { spawn, ChildProcess } from 'child_process';
 import { loadNativeModule } from './nativeModuleLoader';
 
 // RustAudioCapture is the native Rust class (napi-rs) that captures system audio.
@@ -14,10 +15,18 @@ export class SystemAudioCapture extends EventEmitter {
     private chunkCount: number = 0;
     private sampleRatePollTimers: NodeJS.Timeout[] = [];
 
+    // Linux: use parec (PulseAudio/PipeWire) to capture monitor sources
+    private parecProcess: ChildProcess | null = null;
+    private parecChunkCount: number = 0;
+    private parecPartialFrame: Buffer = Buffer.alloc(0);
+    private parecFrameSize: number = 4; // stereo s16le = 4 bytes; mono = 2
+
     constructor(deviceId?: string | null) {
         super();
         this.deviceId = deviceId || null;
-        if (!RustAudioCapture) {
+        if (process.platform === 'linux') {
+            console.log(`[SystemAudioCapture] Linux mode: will use parec for monitor capture.`);
+        } else if (!RustAudioCapture) {
             console.error('[SystemAudioCapture] Rust class implementation not found.');
         } else {
             // LAZY INIT: Don't create native monitor here - it causes 1-second audio mute + quality drop
@@ -27,6 +36,9 @@ export class SystemAudioCapture extends EventEmitter {
     }
 
     public getSampleRate(): number {
+        if (process.platform === 'linux') {
+            return 16000;
+        }
         if (this.monitor) {
             // NAPI-RS V3 auto-converts Rust snake_case to camelCase
             if (typeof this.monitor.getSampleRate === 'function') {
@@ -53,6 +65,11 @@ export class SystemAudioCapture extends EventEmitter {
      */
     public start(): void {
         if (this.isRecording) return;
+
+        if (process.platform === 'linux') {
+            this.startLinux();
+            return;
+        }
 
         if (!RustAudioCapture) {
             console.error('[SystemAudioCapture] Cannot start: Rust module missing');
@@ -145,6 +162,78 @@ export class SystemAudioCapture extends EventEmitter {
         }
     }
 
+    private startLinux(): void {
+        const device = this.deviceId || '@DEFAULT_MONITOR@';
+        const args = ['-d', device, '--rate=16000', '--format=s16le', '--channels=1', '--raw'];
+        console.log(`[SystemAudioCapture] Starting parec: parec ${args.join(' ')}`);
+
+        try {
+            this.parecProcess = spawn('parec', args);
+        } catch (e) {
+            console.error('[SystemAudioCapture] Failed to spawn parec:', e);
+            this.emit('error', e);
+            return;
+        }
+
+        this.isRecording = true;
+        this.parecChunkCount = 0;
+        this.chunkCount = 0;
+        this.parecPartialFrame = Buffer.alloc(0);
+        this.parecFrameSize = 2; // mono s16le = 2 bytes per frame
+
+        this.parecProcess.stdout?.on('data', (chunk: Buffer) => {
+            if (!this.isRecording) return;
+
+            // Buffer may contain partial frames across chunk boundaries
+            const data = Buffer.concat([this.parecPartialFrame, chunk]);
+            const completeFrames = Math.floor(data.length / this.parecFrameSize);
+            if (completeFrames === 0) {
+                this.parecPartialFrame = data;
+                return;
+            }
+
+            const emitLen = completeFrames * this.parecFrameSize;
+            const emitBuf = data.subarray(0, emitLen);
+            this.parecPartialFrame = data.subarray(emitLen);
+
+            this.parecChunkCount++;
+            this.chunkCount++;
+            if (this.chunkCount <= 3 || this.chunkCount % 500 === 0) {
+                console.log(`[SystemAudioCapture] Chunk #${this.chunkCount}: ${emitBuf.length} bytes from parec`);
+            }
+            this.emit('data', emitBuf);
+        });
+
+        this.parecProcess.stderr?.on('data', (data: Buffer) => {
+            const str = data.toString().trim();
+            if (str) {
+                console.error(`[SystemAudioCapture] parec stderr: ${str}`);
+            }
+        });
+
+        this.parecProcess.on('error', (err: Error) => {
+            console.error('[SystemAudioCapture] parec error:', err);
+            if (this.isRecording) {
+                this.isRecording = false;
+                this.emit('error', err);
+            }
+        });
+
+        this.parecProcess.on('close', (code: number | null) => {
+            if (this.isRecording) {
+                console.log(`[SystemAudioCapture] parec exited with code ${code}`);
+                this.isRecording = false;
+                this.emit('error', new Error(`parec exited with code ${code}`));
+            }
+        });
+
+        // Emit fixed sample rate immediately — parec resamples to 16kHz
+        this.detectedSampleRate = 16000;
+        this.emit('sample_rate_changed', 16000);
+
+        this.emit('start');
+    }
+
     /**
      * Stop capturing.
      *
@@ -163,6 +252,18 @@ export class SystemAudioCapture extends EventEmitter {
      */
     public stop(): void {
         if (!this.isRecording) return;
+
+        if (process.platform === 'linux') {
+            console.log('[SystemAudioCapture] Stopping parec capture...');
+            this.isRecording = false;
+            if (this.parecProcess) {
+                this.parecProcess.kill('SIGTERM');
+                this.parecProcess = null;
+            }
+            this.parecPartialFrame = Buffer.alloc(0);
+            this.emit('stop');
+            return;
+        }
 
         // Cancel pending sample-rate polls before nulling the monitor to prevent
         // stale timers from reading a null or re-created monitor on the next start().
@@ -196,5 +297,7 @@ export class SystemAudioCapture extends EventEmitter {
         // or speech_ended delivered via napi scheduler) must not fire after disposal.
         this.removeAllListeners();
         this.monitor = null;
+        this.parecProcess = null;
+        this.parecPartialFrame = Buffer.alloc(0);
     }
 }

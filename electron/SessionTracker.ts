@@ -498,6 +498,7 @@ export class SessionTracker {
         this.codingQuestionSource = null;
         this.codingQuestionSetAt = null;
         this.recentInterviewerBuffer = [];
+        this.clearMeetingMetadata();
     }
 
     // ============================================

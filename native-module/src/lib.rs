@@ -28,6 +28,62 @@ use crate::audio_config::{CHUNK_BATCH_COUNT, CHUNK_BATCH_TIMEOUT_MS, DSP_POLL_MS
 use crate::silence_suppression::{FrameAction, SilenceSuppressionConfig, SilenceSuppressor};
 use std::time::Instant;
 
+use std::sync::Once;
+
+static SET_PANIC_HOOK: Once = Once::new();
+
+#[macro_export]
+macro_rules! safe_println {
+    ($($arg:tt)*) => {{
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), $($arg)*);
+    }};
+}
+
+#[macro_export]
+macro_rules! safe_eprintln {
+    ($($arg:tt)*) => {{
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), $($arg)*);
+    }};
+}
+
+pub fn set_safe_panic_hook() {
+    SET_PANIC_HOOK.call_once(|| {
+        std::panic::set_hook(Box::new(|_info| {}));
+    });
+}
+
+static SILENCE_STDIO: Once = Once::new();
+
+#[cfg(target_os = "linux")]
+pub fn silence_stdout_stderr() {
+    SILENCE_STDIO.call_once(|| unsafe {
+        // Redirect stdout to /dev/null to prevent EIO crashes when the terminal
+        // is detached. We intentionally do NOT redirect stderr — ALSA/PipeWire
+        // on Linux can deadlock if stderr is closed/reopened during PCM init.
+        let devnull = libc::open(
+            b"/dev/null\0".as_ptr() as *const libc::c_char,
+            libc::O_WRONLY,
+        );
+        if devnull >= 0 {
+            libc::dup2(devnull, libc::STDOUT_FILENO);
+            libc::close(devnull);
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn silence_stdout_stderr() {
+    // No-op on non-Linux platforms
+}
+
+pub fn init_native_module() {
+    // TEMP: disabled to test if this causes ALSA hang
+    // silence_stdout_stderr();
+    set_safe_panic_hook();
+}
+
 // ============================================================================
 // HELPERS — i16 slice → zero-copy LE bytes
 // ============================================================================
@@ -126,7 +182,8 @@ pub struct SystemAudioCapture {
 impl SystemAudioCapture {
     #[napi(constructor)]
     pub fn new(device_id: Option<String>) -> napi::Result<Self> {
-        println!("[SystemAudioCapture] Created (device: {:?})", device_id);
+        init_native_module();
+        safe_println!("[SystemAudioCapture] Created (device: {:?})", device_id);
 
         Ok(SystemAudioCapture {
             stop_signal: Arc::new(AtomicBool::new(false)),
@@ -165,11 +222,11 @@ impl SystemAudioCapture {
         // ALL init + DSP runs in background thread — start() returns INSTANTLY
         self.capture_thread = Some(thread::spawn(move || {
             // 1. SpeakerInput Init (takes 5-7 seconds — runs OFF main thread)
-            println!("[SystemAudioCapture] Background init starting...");
+            safe_println!("[SystemAudioCapture] Background init starting...");
             let input = match speaker::SpeakerInput::new(device_id.clone()) {
                 Ok(i) => i,
                 Err(e) => {
-                    println!("[SystemAudioCapture] Init failed: {}. Trying default...", e);
+                    safe_println!("[SystemAudioCapture] Init failed: {}. Trying default...", e);
                     match speaker::SpeakerInput::new(None) {
                         Ok(i) => i,
                         Err(e2) => {
@@ -177,7 +234,7 @@ impl SystemAudioCapture {
                                 "[SystemAudioCapture] FATAL: All init attempts failed: {}",
                                 e2
                             );
-                            eprintln!("{}", msg);
+                            safe_eprintln!("{}", msg);
                             // Notify JS so it can emit 'error' and reset isRecording
                             tsfn.call(
                                 Err(napi::Error::from_reason(msg)),
@@ -196,7 +253,7 @@ impl SystemAudioCapture {
                         "[SystemAudioCapture] FATAL: stream() failed: {}",
                         e
                     );
-                    eprintln!("{}", msg);
+                    safe_eprintln!("{}", msg);
                     tsfn.call(
                         Err(napi::Error::from_reason(msg)),
                         ThreadsafeFunctionCallMode::NonBlocking,
@@ -208,7 +265,7 @@ impl SystemAudioCapture {
                 Some(c) => c,
                 None => {
                     let msg = "[SystemAudioCapture] FATAL: Failed to get consumer".to_string();
-                    eprintln!("{}", msg);
+                    safe_eprintln!("{}", msg);
                     tsfn.call(
                         Err(napi::Error::from_reason(msg)),
                         ThreadsafeFunctionCallMode::NonBlocking,
@@ -220,7 +277,7 @@ impl SystemAudioCapture {
             let native_rate = stream.sample_rate();
             // Publish the real native rate so JS can read it via get_sample_rate()
             sample_rate_shared.store(native_rate, Ordering::Release);
-            println!(
+            safe_println!(
                 "[SystemAudioCapture] Background init complete. Initial Rate: {}Hz. DSP starting.",
                 native_rate
             );
@@ -304,7 +361,7 @@ impl SystemAudioCapture {
 
             // Flush any remaining batched audio before exit.
             emitter.flush(&tsfn);
-            println!("[SystemAudioCapture] DSP thread stopped.");
+            safe_println!("[SystemAudioCapture] DSP thread stopped.");
             // stream is dropped here → SpeakerStream::Drop calls stop_with_ch
         }));
 
@@ -350,6 +407,7 @@ pub struct MicrophoneCapture {
 impl MicrophoneCapture {
     #[napi(constructor)]
     pub fn new(device_id: Option<String>) -> napi::Result<Self> {
+        init_native_module();
         // Eagerly create the stream to detect device errors early and read the
         // native sample rate.
         let input = match microphone::MicrophoneStream::new(device_id.clone()) {
@@ -358,7 +416,7 @@ impl MicrophoneCapture {
         };
 
         let native_rate = input.sample_rate();
-        println!(
+        safe_println!(
             "[MicrophoneCapture] Initialized. Device: {:?}, Rate: {}Hz",
             device_id, native_rate
         );
@@ -392,7 +450,7 @@ impl MicrophoneCapture {
         // If the stream was consumed by a previous start() cycle, recreate it.
         // This is the fix for the one-shot take_consumer() bug.
         if self.input.is_none() {
-            println!("[MicrophoneCapture] Recreating CPAL stream for restart...");
+            safe_println!("[MicrophoneCapture] Recreating CPAL stream for restart...");
             match microphone::MicrophoneStream::new(self.device_id.clone()) {
                 Ok(i) => {
                     let rate = i.sample_rate();
@@ -445,7 +503,7 @@ impl MicrophoneCapture {
             // PERF: coalesce up to CHUNK_BATCH_COUNT frames into one tsfn call.
             let mut emitter = BatchEmitter::new(chunk_size * 2);
 
-            println!("[MicrophoneCapture] DSP thread started (VAD + suppression active, rate={}Hz, chunk={})", native_rate, chunk_size);
+            safe_println!("[MicrophoneCapture] DSP thread started (VAD + suppression active, rate={}Hz, chunk={})", native_rate, chunk_size);
 
             loop {
                 if stop_signal.load(Ordering::Relaxed) {
@@ -461,7 +519,7 @@ impl MicrophoneCapture {
                 if let Ok(mut slot) = err_signal.lock() {
                     if let Some(msg) = slot.take() {
                         let full = format!("[MicrophoneCapture] CPAL error: {}", msg);
-                        eprintln!("{}", full);
+                        safe_eprintln!("{}", full);
                         emitter.flush(&tsfn);
                         tsfn.call(
                             Err(napi::Error::from_reason(full)),
@@ -520,7 +578,7 @@ impl MicrophoneCapture {
             }
 
             emitter.flush(&tsfn);
-            println!("[MicrophoneCapture] DSP thread stopped.");
+            safe_println!("[MicrophoneCapture] DSP thread stopped.");
         }));
 
         Ok(())
@@ -558,7 +616,7 @@ pub fn get_input_devices() -> Vec<AudioDeviceInfo> {
             .map(|(id, name)| AudioDeviceInfo { id, name })
             .collect(),
         Err(e) => {
-            eprintln!("[get_input_devices] Error: {}", e);
+            safe_eprintln!("[get_input_devices] Error: {}", e);
             Vec::new()
         }
     }
@@ -572,7 +630,7 @@ pub fn get_output_devices() -> Vec<AudioDeviceInfo> {
             .map(|(id, name)| AudioDeviceInfo { id, name })
             .collect(),
         Err(e) => {
-            eprintln!("[get_output_devices] Error: {}", e);
+            safe_eprintln!("[get_output_devices] Error: {}", e);
             Vec::new()
         }
     }

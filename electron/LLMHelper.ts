@@ -46,6 +46,7 @@ const GEMINI_PRO_MODEL = "gemini-3.1-pro-preview"
 const GROQ_MODEL = "llama-3.3-70b-versatile"
 const OPENAI_MODEL = "gpt-5.4"
 const CLAUDE_MODEL = "claude-sonnet-4-6"
+const KIMI_MODEL = "kimi-k2.6"
 const MAX_OUTPUT_TOKENS = 65536
 const CLAUDE_MAX_OUTPUT_TOKENS = 64000
 
@@ -57,10 +58,13 @@ export class LLMHelper {
   private groqClient: Groq | null = null
   private openaiClient: OpenAI | null = null
   private claudeClient: Anthropic | null = null
+  private kimiClient: OpenAI | null = null
+  private isKimiCodeKey: boolean = false
   private apiKey: string | null = null
   private groqApiKey: string | null = null
   private openaiApiKey: string | null = null
   private claudeApiKey: string | null = null
+  private kimiApiKey: string | null = null
   private useOllama: boolean = false
   private ollamaModel: string = ""
   private ollamaUrl: string = "http://127.0.0.1:11434"
@@ -120,7 +124,7 @@ export class LLMHelper {
     assertProviderDataScopes(provider, this.scopesForPayload(text, imagePaths, extraScopes), this.getProviderScopePolicy());
   }
 
-  constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string) {
+  constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string, kimiApiKey?: string) {
     this.useOllama = useOllama
 
     // Initialize rate limiters
@@ -151,6 +155,25 @@ export class LLMHelper {
       this.claudeApiKey = claudeApiKey
       this.claudeClient = new Anthropic({ apiKey: claudeApiKey })
       console.log(`[LLMHelper] Claude client initialized with model: ${CLAUDE_MODEL}`)
+    }
+
+    // Initialize Kimi client if API key provided (OpenAI-compatible API)
+    if (kimiApiKey) {
+      this.kimiApiKey = kimiApiKey
+      // KimiCode keys (sk-kimi-...) use the coding endpoint and require a whitelisted User-Agent.
+      // Moonshot open-platform keys (sk-...) use the standard endpoint.
+      this.isKimiCodeKey = kimiApiKey.startsWith('sk-kimi-');
+      const kimiBaseUrl = process.env.KIMI_BASE_URL || (this.isKimiCodeKey ? 'https://api.kimi.com/coding/v1' : 'https://api.moonshot.ai/v1');
+      const kimiHeaders: Record<string, string> = {};
+      if (this.isKimiCodeKey) {
+        kimiHeaders['User-Agent'] = 'KimiCLI/1.5';
+      }
+      this.kimiClient = new OpenAI({
+        baseURL: kimiBaseUrl,
+        apiKey: kimiApiKey,
+        defaultHeaders: Object.keys(kimiHeaders).length ? kimiHeaders : undefined,
+      })
+      console.log(`[LLMHelper] Kimi client initialized with model: ${KIMI_MODEL}`)
     }
 
     if (useOllama) {
@@ -191,6 +214,15 @@ export class LLMHelper {
       || /(^|[^a-z])o1([^a-z]|$)/i.test(modelId);
   }
 
+  private getReasoningEnabled(): boolean {
+    try {
+      const { SettingsManager } = require('./services/SettingsManager');
+      return SettingsManager.getInstance().get('reasoningEnabled') === true;
+    } catch {
+      return false;
+    }
+  }
+
   public setGroqApiKey(apiKey: string) {
     this.groqClient = new Groq({ apiKey });
     this._groqLocalDisabled = false;
@@ -207,6 +239,18 @@ export class LLMHelper {
     this.claudeApiKey = apiKey;
     this.claudeClient = new Anthropic({ apiKey });
     console.log("[LLMHelper] Claude API Key updated.");
+  }
+
+  public setKimiApiKey(apiKey: string) {
+    this.kimiApiKey = apiKey;
+    this.isKimiCodeKey = apiKey.startsWith('sk-kimi-');
+    const kimiBaseUrl = process.env.KIMI_BASE_URL || (this.isKimiCodeKey ? 'https://api.kimi.com/coding/v1' : 'https://api.moonshot.ai/v1');
+    const kimiHeaders: Record<string, string> = {};
+    if (this.isKimiCodeKey) {
+      kimiHeaders['User-Agent'] = 'KimiCLI/1.5';
+    }
+    this.kimiClient = new OpenAI({ apiKey, baseURL: kimiBaseUrl, defaultHeaders: Object.keys(kimiHeaders).length ? kimiHeaders : undefined });
+    console.log("[LLMHelper] Kimi API Key updated.");
   }
 
   public setNativelyKey(key: string | null): void {
@@ -243,6 +287,7 @@ export class LLMHelper {
       gemini: this.apiKey,
       claude: this.claudeApiKey,
       groq: this.groqApiKey,
+      kimi: this.kimiApiKey,
     });
     await this.modelVersionManager.initialize();
     console.log(this.modelVersionManager.getSummary());
@@ -264,7 +309,7 @@ export class LLMHelper {
   // these named entry points so the surface stays auditable.
 
   public async runVisionRequest(
-    providerId: 'natively' | 'openai' | 'claude' | 'gemini_flash' | 'gemini_pro' | 'groq_scout' | 'custom',
+    providerId: 'natively' | 'openai' | 'claude' | 'gemini_flash' | 'gemini_pro' | 'groq_scout' | 'kimi' | 'custom',
     userPrompt: string,
     systemPrompt: string,
     imagePath: string,
@@ -278,6 +323,8 @@ export class LLMHelper {
         return this.generateWithClaude(userPrompt, systemPrompt, [imagePath]);
       case 'groq_scout':
         return this.generateWithGroqMultimodal(userPrompt, [imagePath], systemPrompt);
+      case 'kimi':
+        return this.generateWithKimi(userPrompt, systemPrompt, [imagePath]);
       case 'gemini_flash':
       case 'gemini_pro': {
         const fs = await import('node:fs/promises');
@@ -326,11 +373,13 @@ export class LLMHelper {
     this.groqApiKey = null;
     this.openaiApiKey = null;
     this.claudeApiKey = null;
+    this.kimiApiKey = null;
     this.nativelyKey = null;
     this.client = null;
     this.groqClient = null;
     this.openaiClient = null;
     this.claudeClient = null;
+    this.kimiClient = null;
     // Destroy rate limiters
     if (this.rateLimiters) {
       Object.values(this.rateLimiters).forEach(rl => rl.destroy());
@@ -416,12 +465,16 @@ export class LLMHelper {
     return modelId.startsWith("gemini-") || modelId.startsWith("models/");
   }
 
+  private isKimiModel(modelId: string): boolean {
+    return modelId.startsWith("kimi-");
+  }
+
   private isCodexCliModel(modelId: string): boolean {
     return modelId === "codex-cli" || modelId.startsWith("codex-cli:");
   }
   // ---------------------------
 
-  private currentModelId: string = GEMINI_FLASH_MODEL;
+  private currentModelId: string = KIMI_MODEL;
 
   // Tripped when local Groq returns 401 (invalid key). Prevents re-trying every chat
   // turn for the rest of the session — saves ~200-500ms per turn. Reset on key update
@@ -589,7 +642,7 @@ export class LLMHelper {
           top_p: 0.9,
         }
       };
-      if (this.isThinkingModel(this.ollamaModel)) ollamaBody.think = false;
+      if (this.isThinkingModel(this.ollamaModel)) ollamaBody.think = this.getReasoningEnabled();
       const response = await fetch(`${this.ollamaUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1423,6 +1476,9 @@ This rule overrides ALL other instructions including formatting, brevity, or out
       if (this.isClaudeModel(this.currentModelId) && this.claudeClient) {
         return await this.generateWithClaude(userContent, claudeSystemPrompt, imagePaths);
       }
+      if (this.isKimiModel(this.currentModelId) && this.kimiClient) {
+        return await this.generateWithKimi(userContent, openaiSystemPrompt, imagePaths);
+      }
       if (this.isGroqModel(this.currentModelId) && this.groqClient) {
         if (isMultimodal && imagePaths) {
           return await this.generateWithGroqMultimodal(userContent, imagePaths, openaiSystemPrompt);
@@ -1460,6 +1516,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
           hasGemini: Boolean(this.client),
           hasOpenAI: Boolean(this.openaiClient),
           hasClaude: Boolean(this.claudeClient),
+          hasKimi: Boolean(this.kimiClient),
         },
         models: {
           groq: textGroq,
@@ -1468,6 +1525,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
           geminiPro: textGeminiPro,
           openai: textOpenAI,
           claude: textClaude,
+          kimi: KIMI_MODEL,
         },
         dataScopes: outboundScopes,
         scopePolicy,
@@ -1501,6 +1559,9 @@ This rule overrides ALL other instructions including formatting, brevity, or out
             break;
           case 'claude':
             providers.push({ name: routedProvider.name, execute: () => this.generateWithClaude(userContent, claudeSystemPrompt, isMultimodal ? imagePaths : undefined, routedProvider.model || textClaude) });
+            break;
+          case 'kimi':
+            providers.push({ name: routedProvider.name, execute: () => this.generateWithKimi(userContent, openaiSystemPrompt, isMultimodal ? imagePaths : undefined, routedProvider.model || KIMI_MODEL) });
             break;
         }
       }
@@ -1585,6 +1646,11 @@ This rule overrides ALL other instructions including formatting, brevity, or out
       providers.push({ name: `Claude (${CLAUDE_MODEL})`, execute: () => this.generateWithClaude(message) });
     }
 
+    // Priority 2.5: Kimi
+    if (this.kimiClient) {
+      providers.push({ name: `Kimi (${KIMI_MODEL})`, execute: () => this.generateWithKimi(message) });
+    }
+
     // Priority 3: Gemini Pro (don't mutate this.geminiModel to avoid race conditions)
     if (this.client) {
       providers.push({
@@ -1635,6 +1701,11 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     // Priority 5: Groq (Fallback despite JSON hallucination risks)
     if (this.groqClient) {
       providers.push({ name: `Groq (${GROQ_MODEL}) fallback`, execute: () => this.generateWithGroq(message) }); // intentional: structured-gen last-resort uses stable baseline model, not user selection
+    }
+
+    // Priority 5.5: Kimi fallback
+    if (this.kimiClient) {
+      providers.push({ name: `Kimi (${KIMI_MODEL}) fallback`, execute: () => this.generateWithKimi(message) });
     }
 
     // Priority 6: Ollama (on-device fallback — last resort, no cloud dependency)
@@ -1756,6 +1827,94 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     });
 
     return response.choices[0]?.message?.content || "";
+  }
+
+  /**
+   * Non-streaming Kimi generation using OpenAI-compatible API.
+   */
+  private async generateWithKimi(userMessage: string, systemPrompt?: string, imagePaths?: string[], modelId?: string): Promise<string> {
+    if (this.isLocalOnlyMode) throw new Error("Cloud providers disabled in local-only mode");
+    if (!this.kimiClient) throw new Error("Kimi client not initialized");
+    this.assertOutboundScopes('kimi', userMessage, imagePaths);
+
+    await this.rateLimiters.openai.acquire();
+
+    const model = modelId || (this.isKimiCodeKey ? 'kimi-for-coding' : (this.isKimiModel(this.currentModelId) ? this.currentModelId : KIMI_MODEL));
+
+    const messages: any[] = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+
+    if (imagePaths?.length) {
+      const contentParts: any[] = [{ type: "text", text: userMessage }];
+      for (const p of imagePaths) {
+        if (fs.existsSync(p)) {
+          const { mimeType, data } = await this.processImage(p);
+          contentParts.push({ type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } });
+        }
+      }
+      messages.push({ role: "user", content: contentParts });
+    } else {
+      messages.push({ role: "user", content: userMessage });
+    }
+
+    const response = await this.withTimeout(
+      this.withRetry(() => this.kimiClient!.chat.completions.create({
+        model,
+        messages,
+        max_completion_tokens: MAX_OUTPUT_TOKENS,
+      })),
+      60000,
+      `Kimi (${model})`
+    );
+
+    return response.choices[0]?.message?.content || "";
+  }
+
+  /**
+   * Stream response from Kimi using OpenAI-compatible API.
+   */
+  private async * streamWithKimi(userMessage: string, systemPrompt?: string, imagePaths?: string[], modelId?: string): AsyncGenerator<string, void, unknown> {
+    if (this.isLocalOnlyMode) throw new Error("Cloud providers disabled in local-only mode");
+    if (!this.kimiClient) throw new Error("Kimi client not initialized");
+    this.assertOutboundScopes('kimi', userMessage, imagePaths);
+
+    await this.rateLimiters.openai.acquire();
+
+    const model = modelId || (this.isKimiCodeKey ? 'kimi-for-coding' : (this.isKimiModel(this.currentModelId) ? this.currentModelId : KIMI_MODEL));
+
+    const messages: any[] = [];
+    if (systemPrompt) {
+      messages.push({ role: "system", content: systemPrompt });
+    }
+
+    if (imagePaths?.length) {
+      const contentParts: any[] = [{ type: "text", text: userMessage }];
+      for (const p of imagePaths) {
+        if (fs.existsSync(p)) {
+          const { mimeType, data } = await this.processImage(p);
+          contentParts.push({ type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } });
+        }
+      }
+      messages.push({ role: "user", content: contentParts });
+    } else {
+      messages.push({ role: "user", content: userMessage });
+    }
+
+    const stream = await this.kimiClient.chat.completions.create({
+      model,
+      messages,
+      stream: true,
+      max_completion_tokens: MAX_OUTPUT_TOKENS,
+    });
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        yield content;
+      }
+    }
   }
 
   /**
@@ -2372,6 +2531,14 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     const tier2Providers = buildTierProviders('tier2');
     const tier3Providers = buildTierProviders('tier3'); // Same as tier2 — pure retry
 
+    // Kimi fallback for vision (OpenAI-compatible)
+    if (this.kimiClient) {
+      tier1Providers.unshift({
+        name: `Kimi (${KIMI_MODEL})`,
+        execute: () => this.generateWithKimi(userPrompt, systemPrompt, isMultimodal ? imagePaths : undefined)
+      });
+    }
+
 
     // ──────────────────────────────────────────────────────────────────
     // Local fallback providers (appended after all cloud tiers)
@@ -2619,6 +2786,9 @@ This rule overrides ALL other instructions including formatting, brevity, or out
       if (this.claudeClient) {
         providers.push({ name: `Claude (${textClaude})`, execute: () => this.streamWithClaude(userContent, claudeSystemPrompt, textClaude) });
       }
+      if (this.kimiClient) {
+        providers.push({ name: `Kimi (${KIMI_MODEL})`, execute: () => this.streamWithKimi(userContent, openaiSystemPrompt) });
+      }
       if (this.client) {
         // CACHE: pass system via systemInstruction so it is separated from per-request contents.
         providers.push({ name: `Gemini Flash (${textGeminiFlash})`, execute: () => this.streamWithGeminiModel(userContent, textGeminiFlash, undefined, geminiSystemForCache) });
@@ -2639,9 +2809,10 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     const currentFamilyLabel = this.currentModelId === 'natively' ? 'Natively'
       : this.isClaudeModel(this.currentModelId) ? 'Claude'
         : this.isOpenAiModel(this.currentModelId) ? 'OpenAI'
-          : this.isGroqModel(this.currentModelId) ? 'Groq'
-            : this.isGeminiModel(this.currentModelId) ? 'Gemini'
-              : '';
+          : this.isKimiModel(this.currentModelId) ? 'Kimi'
+            : this.isGroqModel(this.currentModelId) ? 'Groq'
+              : this.isGeminiModel(this.currentModelId) ? 'Gemini'
+                : '';
 
     if (currentFamilyLabel) {
       providers.sort((a, b) => {
@@ -2942,6 +3113,14 @@ This rule overrides ALL other instructions including formatting, brevity, or out
       return;
     }
 
+    // Kimi (OpenAI-compatible)
+    if (this.isKimiModel(this.currentModelId) && this.kimiClient) {
+      const kimiSystem = systemPromptOverride || OPENAI_SYSTEM_PROMPT;
+      const finalKimiSystem = this.injectLanguageInstruction(kimiSystem);
+      yield* this.streamWithKimi(userContent, finalKimiSystem, imagePaths);
+      return;
+    }
+
     // Groq (Text + Multimodal)
     if (this.isGroqModel(this.currentModelId) && this.groqClient) {
       if (isMultimodal && imagePaths) {
@@ -2956,6 +3135,13 @@ This rule overrides ALL other instructions including formatting, brevity, or out
       const finalGroqSystem = this.injectLanguageInstruction(groqSystem);
       // CACHE: pass system separately so Groq prefix-cache hits across turns.
       yield* this.streamWithGroq(userContent, this.currentModelId, finalGroqSystem);
+      return;
+    }
+
+    if (this.isKimiModel(this.currentModelId) && this.kimiClient) {
+      const kimiSystem = systemPromptOverride || OPENAI_SYSTEM_PROMPT;
+      const finalKimiSystem = this.injectLanguageInstruction(kimiSystem);
+      yield* this.streamWithKimi(userContent, finalKimiSystem, imagePaths);
       return;
     }
 
@@ -3681,7 +3867,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
           num_predict: getModelCapabilities(this.ollamaModel, true).tier === 'local-small' ? 180 : undefined,
         }
       };
-      if (this.isThinkingModel(this.ollamaModel)) streamBody.think = false;
+      if (this.isThinkingModel(this.ollamaModel)) streamBody.think = this.getReasoningEnabled();
       const response = await fetch(`${this.ollamaUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3872,6 +4058,14 @@ This rule overrides ALL other instructions including formatting, brevity, or out
 
   public isUsingOllama(): boolean {
     return this.useOllama;
+  }
+
+  /**
+   * Returns true if any cloud provider client is initialized (Gemini, Groq, OpenAI, Claude, Kimi, Natively, or custom).
+   * Used by ProcessingHelper to decide whether to preserve Ollama mode when a cloud default model is loaded.
+   */
+  public hasAnyCloudProvider(): boolean {
+    return !!(this.client || this.groqClient || this.openaiClient || this.claudeClient || this.kimiClient || this.nativelyKey || this.customProvider);
   }
 
   public async getOllamaModels(): Promise<string[]> {
@@ -4201,8 +4395,9 @@ This rule overrides ALL other instructions including formatting, brevity, or out
    * 0. Custom / cURL Provider (if user selected one — always takes priority)
    * 1. Natively API (if configured)
    * 2. Groq (if context text < 100k tokens approx)
-   * 3. Gemini Flash (Retry 2x)
-   * 4. Gemini Pro (Retry 5x)
+   * 3. Kimi (if configured)
+   * 4. Gemini Flash (Retry 2x)
+   * 5. Gemini Pro (Retry 5x)
    */
   public async generateMeetingSummary(systemPrompt: string, context: string, groqSystemPrompt?: string): Promise<string> {
     console.log(`[LLMHelper] generateMeetingSummary called. Context length: ${context.length}`);
@@ -4299,7 +4494,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
           return this.processResponse(text);
         }
       } catch (e: any) {
-        console.warn(`[LLMHelper] ⚠️ Groq summary failed: ${e.message}. Falling back to Gemini...`);
+        console.warn(`[LLMHelper] ⚠️ Groq summary failed: ${e.message}. Falling back...`);
       }
     } else {
       if (tokenCount >= 100000) {
@@ -4307,7 +4502,25 @@ This rule overrides ALL other instructions including formatting, brevity, or out
       }
     }
 
-    // ATTEMPT 3: Gemini Flash (with 2 retries = 3 attempts total)
+    // ATTEMPT 3: Kimi (if configured)
+    if (this.kimiClient) {
+      console.log(`[LLMHelper] Attempting Kimi for summary...`);
+      try {
+        const text = await this.withTimeout(
+          this.generateWithKimi(`Context:\n${context}`, systemPrompt),
+          45000,
+          'Kimi Summary'
+        );
+        if (text.trim().length > 0) {
+          console.log(`[LLMHelper] ✅ Kimi summary generated successfully.`);
+          return this.processResponse(text);
+        }
+      } catch (e: any) {
+        console.warn(`[LLMHelper] ⚠️ Kimi summary failed: ${e.message}. Falling back to Gemini...`);
+      }
+    }
+
+    // ATTEMPT 4: Gemini Flash (with 2 retries = 3 attempts total)
     console.log(`[LLMHelper] Attempting Gemini Flash for summary...`);
     const contents = [{ text: `${systemPrompt}\n\nCONTEXT:\n${context}` }];
 
@@ -4330,7 +4543,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
       }
     }
 
-    // ATTEMPT 4: Gemini Pro
+    // ATTEMPT 5: Gemini Pro
     console.log(`[LLMHelper] ⚠️ Flash exhausted. Switching to Gemini Pro for robust retry...`);
     const maxProRetries = 5;
 

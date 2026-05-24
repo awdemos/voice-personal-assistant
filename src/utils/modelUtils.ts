@@ -3,8 +3,15 @@ export const STANDARD_CLOUD_MODELS: Record<string, {
     ids: string[];
     names: string[];
     descs: string[];
-    pmKey: 'geminiPreferredModel' | 'openaiPreferredModel' | 'claudePreferredModel' | 'groqPreferredModel';
+    pmKey: 'geminiPreferredModel' | 'openaiPreferredModel' | 'claudePreferredModel' | 'groqPreferredModel' | 'kimiPreferredModel';
 }> = {
+    kimi: {
+        hasKeyCheck: (creds) => !!creds?.hasKimiKey,
+        ids: ['kimi-k2.6-fast', 'kimi-k2.5'],
+        names: ['Kimi K2.6 Fast', 'Kimi K2.5'],
+        descs: ['Moonshot AI • Fast • Latest', 'Moonshot AI • Legacy'],
+        pmKey: 'kimiPreferredModel'
+    },
     gemini: {
         hasKeyCheck: (creds) => !!creds?.hasGeminiKey,
         ids: ['gemini-3.1-flash-lite-preview', 'gemini-3.1-pro-preview'],

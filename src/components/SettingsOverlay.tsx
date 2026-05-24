@@ -6,7 +6,7 @@ import {
     Camera, RotateCcw, Eye, Layout, MessageSquare, Crop,
     ChevronDown, ChevronUp, Check, BadgeCheck, Power, Palette, Calendar, Ghost, Sun, Moon, RefreshCw, Info, Globe, FlaskConical, Terminal, Settings, Activity, ExternalLink, Trash2,
     Sparkles, Pencil, Briefcase, Building2, Search, MapPin, CheckCircle, HelpCircle, Zap, SlidersHorizontal, PointerOff,
-    Star, AlertCircle, Gift, Smartphone, Cpu, Shield
+    Star, AlertCircle, Gift, Smartphone, Cpu, Shield, Brain
 } from 'lucide-react';
 import { analytics } from '../lib/analytics/analytics.service';
 import { AboutSection } from './AboutSection';
@@ -385,6 +385,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
     const [providerDataScopes, setProviderDataScopes] = useState<{ transcript?: boolean; screenshots?: boolean; reference_files?: boolean; profile_history?: boolean; embeddings?: boolean; post_call_summary?: boolean }>({});
     const [screenUnderstandingMode, setScreenUnderstandingMode] = useState<'vision_first' | 'vision_only' | 'private_vision'>('vision_first');
     const [technicalInterviewVisionFirst, setTechnicalInterviewVisionFirst] = useState<boolean>(true);
+    const [reasoningEnabled, setReasoningEnabled] = useState<boolean>(false);
     const [showVerboseToast, setShowVerboseToast] = useState(false);
     const verboseToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -408,6 +409,7 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                     // Fallback to deprecated alias if the renderer is talking to an older main process.
                     window.electronAPI?.getTechnicalInterviewDirectVision?.().then(setTechnicalInterviewVisionFirst).catch(() => { });
                 });
+            window.electronAPI?.getReasoningEnabled?.().then(setReasoningEnabled).catch(() => { });
         }
     }, [isOpen]);
 
@@ -427,6 +429,11 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
             unsub1?.();
             unsub2?.();
         };
+    }, []);
+
+    useEffect(() => {
+        const unsub = window.electronAPI?.onReasoningEnabledChanged?.((enabled: boolean) => setReasoningEnabled(enabled));
+        return () => unsub?.();
     }, []);
 
     useEffect(() => {
@@ -1663,6 +1670,29 @@ const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClose, init
                                                             aria-checked={technicalInterviewVisionFirst}
                                                         >
                                                             <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${technicalInterviewVisionFirst ? 'translate-x-4' : 'translate-x-0'}`} />
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-border-subtle px-4 py-3">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className={`w-10 h-10 bg-bg-item-surface rounded-lg border flex items-center justify-center transition-colors ${reasoningEnabled ? 'border-violet-500/40 text-violet-400' : 'border-border-subtle text-text-tertiary'}`}>
+                                                                <Brain size={20} />
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="text-sm font-bold text-text-primary">LLM reasoning</h3>
+                                                                <p className="text-xs text-text-secondary mt-0.5">Show the model&apos;s chain-of-thought thinking process. Slightly slower but more transparent.</p>
+                                                            </div>
+                                                        </div>
+                                                        <div
+                                                            onClick={() => {
+                                                                const next = !reasoningEnabled;
+                                                                setReasoningEnabled(next);
+                                                                window.electronAPI?.setReasoningEnabled?.(next);
+                                                            }}
+                                                            className={`w-9 h-5 rounded-full relative transition-colors cursor-pointer ${reasoningEnabled ? 'bg-emerald-500' : 'bg-bg-toggle-switch border border-border-muted'}`}
+                                                            role="switch"
+                                                            aria-checked={reasoningEnabled}
+                                                        >
+                                                            <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${reasoningEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
                                                         </div>
                                                     </div>
                                                 </div>

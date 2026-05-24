@@ -15,6 +15,7 @@
 // - Speech onset: 0ms delay (immediate)
 // - Hangover: Only affects AFTER speech ends (no latency impact)
 
+use crate::{safe_println, safe_eprintln};
 use std::time::{Duration, Instant};
 use webrtc_vad::{SampleRate as VadSampleRate, Vad, VadMode};
 
@@ -167,7 +168,7 @@ impl SilenceSuppressor {
 
         let vad = Vad::new_with_rate_and_mode(VadSampleRate::Rate16kHz, mode_clone);
 
-        println!(
+        safe_println!(
             "[SilenceSuppressor] Created: threshold={} (adaptive), hangover={}ms, \
              keepalive={}ms, native_rate={}Hz, decimation={:.2}x, use_vad={}, VAD_mode={}",
             config.speech_threshold_rms,

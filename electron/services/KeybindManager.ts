@@ -76,6 +76,10 @@ export class KeybindManager {
         this.registerGlobalShortcuts();
     }
 
+    private isWayland(): boolean {
+        return process.platform === 'linux' && !!process.env.WAYLAND_DISPLAY;
+    }
+
     private shouldRegister(actionId: string): boolean {
         if (this.activeMode === 'overlay') return true;
 
@@ -89,6 +93,15 @@ export class KeybindManager {
         // launcher mode because globalShortcut.register() is never called for them.
         // Also fixes the silent rebind failure: re-registration after setKeybind()
         // hit the same gate and dropped the newly bound accelerator too.
+        //
+        // EXCEPTION: On Linux Wayland, global shortcuts are unsupported by most
+        // compositors and can trigger native crashes in Electron. We fall back to
+        // local renderer shortcuts (works when app is focused) and tray/UI buttons.
+        if (this.isWayland()) {
+            if (actionId === 'general:take-screenshot') return false;
+            if (actionId === 'general:selective-screenshot') return false;
+            if (actionId === 'general:capture-and-process') return false;
+        }
         if (actionId === 'general:take-screenshot') return true;
         if (actionId === 'general:selective-screenshot') return true;
         if (actionId === 'general:capture-and-process') return true;
@@ -262,7 +275,11 @@ export class KeybindManager {
                 const acc = kb.accelerator.trim();
                 try {
                     globalShortcut.register(acc, () => {
-                        this.onShortcutTriggeredCallbacks.forEach(cb => cb(kb.id));
+                        try {
+                            this.onShortcutTriggeredCallbacks.forEach(cb => cb(kb.id));
+                        } catch (cbErr) {
+                            console.error(`[KeybindManager] Uncaught exception in shortcut callback for ${kb.id}:`, cbErr);
+                        }
                     });
                     if (globalShortcut.isRegistered(acc)) {
                         console.log(`[KeybindManager] Registered global shortcut: ${acc} -> ${kb.id}`);

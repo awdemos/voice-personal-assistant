@@ -40,6 +40,7 @@ export function buildVisionProviders(inputs: VisionProviderBuildInputs): VisionP
 
   if (cloudAllowed) {
     providers.push(natively(credentials, inputs));
+    providers.push(kimi(credentials, inputs));
     providers.push(openai(credentials, inputs));
     providers.push(geminiFlash(credentials, inputs));
     providers.push(claude(credentials, inputs));
@@ -114,6 +115,21 @@ function claude(creds: CredentialsManager, _inputs: VisionProviderBuildInputs): 
     scopeAllowsScreenshots: true,
     hint: 'claude',
     invoke: async (p) => callLLMHelperVision('claude', p),
+  };
+}
+
+function kimi(creds: CredentialsManager, _inputs: VisionProviderBuildInputs): VisionProviderConfig {
+  const apiKey = creds.getKimiApiKey();
+  return {
+    id: 'kimi',
+    displayName: 'Kimi',
+        modelId: 'kimi-k2.6-fast',
+    isLocal: false,
+    isConfigured: !!apiKey,
+    supportsVision: !!apiKey,
+    scopeAllowsScreenshots: true,
+    hint: 'kimi',
+    invoke: async (p) => callLLMHelperVision('kimi', p),
   };
 }
 

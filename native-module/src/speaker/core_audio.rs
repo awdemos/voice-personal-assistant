@@ -1,3 +1,4 @@
+use crate::{safe_println, safe_eprintln};
 use anyhow::Result;
 use ca::aggregate_device_keys as agg_keys;
 use cidre::{arc, av, cat, cf, core_audio as ca, ns, os};
@@ -38,7 +39,7 @@ impl SpeakerInput {
         };
 
         let output_uid = output_device.uid()?;
-        println!("[CoreAudioTap] Target device UID: {}", output_uid);
+        safe_println!("[CoreAudioTap] Target device UID: {}", output_uid);
         let output_uid_ns = ns::String::with_str(&output_uid.to_string());
 
         // 2. Create a device-scoped tap with explicit mute behavior.
@@ -55,7 +56,7 @@ impl SpeakerInput {
         tap_desc.set_mixdown(true);
         tap_desc.set_mute_behavior(ca::TapMuteBehavior::Unmuted);
         let tap = tap_desc.create_process_tap()?;
-        println!("[CoreAudioTap] Tap created: {:?}", tap.uid());
+        safe_println!("[CoreAudioTap] Tap created: {:?}", tap.uid());
 
         let sub_tap = cf::DictionaryOf::with_keys_values(
             &[ca::sub_device_keys::uid()],
@@ -104,7 +105,7 @@ impl SpeakerInput {
             .map_err(|_| anyhow::anyhow!("Failed to get ASBD from tap"))?;
         let format = av::AudioFormat::with_asbd(&asbd).unwrap();
         let channels = asbd.channels_per_frame;
-        println!(
+        safe_println!(
             "[CoreAudioTap] Format: {}Hz, {}ch",
             asbd.sample_rate, channels
         );
@@ -126,7 +127,7 @@ impl SpeakerInput {
 
         let proc_id = agg_device.create_io_proc_id(proc, Some(&mut *ctx))?;
         let started_device = ca::device_start(agg_device, Some(proc_id))?;
-        println!("[CoreAudioTap] Aggregate device started successfully");
+        safe_println!("[CoreAudioTap] Aggregate device started successfully");
 
         // We now return the fully started device inside Ok.
         // If anything above fails, it yields an Err(), triggering SCK fallback smoothly!
@@ -237,14 +238,14 @@ impl SpeakerStream {
     /// NOTE: This is a one-way operation for CoreAudio — resume() is not supported.
     pub fn pause(&mut self) {
         self._device = None;
-        println!("[CoreAudioTap] Device paused (aggregate device preserved in HAL)");
+        safe_println!("[CoreAudioTap] Device paused (aggregate device preserved in HAL)");
     }
 
     /// Resume is not supported for CoreAudio aggregate devices — they must be fully recreated.
     /// Callers should detect this and recreate the SpeakerInput/SpeakerStream.
     pub fn resume(&mut self) -> Result<()> {
         if self._device.is_none() {
-            println!(
+            safe_println!(
                 "[CoreAudioTap] Resume not supported — aggregate device needs full recreation"
             );
             return Err(anyhow::anyhow!(

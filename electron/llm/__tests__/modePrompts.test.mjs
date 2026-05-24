@@ -47,7 +47,7 @@ function assertIncludesAll(text, terms, label) {
 test('every mode prompt includes shared prompt-leakage and safety controls', () => {
   for (const [modeType, prompt] of Object.entries(MODE_PROMPTS)) {
     assertIncludesAll(prompt, [
-      '<security>',
+      '## Security',
       'system prompt',
       'instructions',
       'reveal',
@@ -59,9 +59,9 @@ test('every mode prompt includes shared prompt-leakage and safety controls', () 
 test('every mode prompt includes injected context handling for custom context and reference files', () => {
   for (const [modeType, prompt] of Object.entries(MODE_PROMPTS)) {
     assertIncludesAll(prompt, [
-      '<injected_context>',
-      '<user_context>',
-      '<reference_file name="...">',
+      'Injected Context',
+      'user_context',
+      'reference_file name="..."',
       'file name',
     ], modeType);
   }
@@ -103,14 +103,14 @@ test('mode prompts are meaningfully distinct rather than flattened generic advic
 });
 
 test('profile-aware modes mention candidate/profile grounding without requiring every mode to overfit resume data', () => {
-  assertIncludesAll(MODE_PROMPTS['looking-for-work'], ['<candidate_experience>', 'resume', 'do not invent', 'salary_intelligence'], 'looking-for-work');
-  assertIncludesAll(MODE_PROMPTS['technical-interview'], ['<candidate_experience>', 'technical interview', 'salary_intelligence'], 'technical-interview');
-  assertIncludesAll(MODE_PROMPTS.general, ['<candidate_experience>', 'do not invent', 'salary_intelligence'], 'general');
+  assertIncludesAll(MODE_PROMPTS['looking-for-work'], ['candidate_experience', 'resume', 'do not invent', 'salary_intelligence'], 'looking-for-work');
+  assertIncludesAll(MODE_PROMPTS['technical-interview'], ['candidate_experience', 'technical interview', 'salary_intelligence'], 'technical-interview');
+  assertIncludesAll(MODE_PROMPTS.general, ['candidate_experience', 'do not invent', 'salary_intelligence'], 'general');
 });
 
 test('looking-for-work prompt stabilizes no-overclaim behavior with few-shot examples', () => {
   assertIncludesAll(MODE_PROMPTS['looking-for-work'], [
-    '<no_overclaim_examples>',
+    'No-Overclaim Examples',
     'No context behavioral question',
     'Weak context with role or project but no metrics',
     'JD skill absent from profile context',
@@ -164,7 +164,7 @@ test('code hint examples avoid named problems and em dashes', () => {
     'Do not copy sample problem names, line numbers, metrics, or concrete fixes unless they are visible',
   ], 'code-hint');
 
-  const examples = prompts.CODE_HINT_PROMPT.match(/<output_examples>[\s\S]*?<\/output_examples>/)?.[0] ?? '';
+  const examples = prompts.CODE_HINT_PROMPT.match(/\*\*Output Examples:\*\*[\s\S]*?(?=\*\*Strict Rules\*\*|$)/)?.[0] ?? '';
   assert.match(examples, /Use schematic examples only/);
   assert.doesNotMatch(examples, /Two Sum/);
   assert.doesNotMatch(examples, /line 8/);

@@ -37,13 +37,14 @@ export class ProcessingHelper {
       let groqApiKey = process.env.GROQ_API_KEY
       let openaiApiKey = process.env.OPENAI_API_KEY
       let claudeApiKey = process.env.CLAUDE_API_KEY
+      let kimiApiKey = process.env.KIMI_API_KEY
 
       // Allow initializing without key (will be loaded in loadStoredCredentials or via Settings)
       if (!apiKey) {
         console.warn("[ProcessingHelper] GEMINI_API_KEY not found in env. Will try CredentialsManager after ready.")
       }
 
-      this.llmHelper = new LLMHelper(apiKey, false, undefined, undefined, groqApiKey, openaiApiKey, claudeApiKey)
+      this.llmHelper = new LLMHelper(apiKey, false, undefined, undefined, groqApiKey, openaiApiKey, claudeApiKey, kimiApiKey)
     }
   }
 
@@ -58,6 +59,7 @@ export class ProcessingHelper {
     const groqKey = credManager.getGroqApiKey();
     const openaiKey = credManager.getOpenaiApiKey();
     const claudeKey = credManager.getClaudeApiKey();
+    const kimiKey = credManager.getKimiApiKey();
 
     if (geminiKey) {
       console.log("[ProcessingHelper] Loading stored Gemini API Key from CredentialsManager");
@@ -77,6 +79,11 @@ export class ProcessingHelper {
     if (claudeKey) {
       console.log("[ProcessingHelper] Loading stored Claude API Key from CredentialsManager");
       this.llmHelper.setClaudeApiKey(claudeKey);
+    }
+
+    if (kimiKey) {
+      console.log("[ProcessingHelper] Loading stored Kimi API Key from CredentialsManager");
+      this.llmHelper.setKimiApiKey(kimiKey);
     }
 
     const nativelyKey = credManager.getNativelyApiKey();
@@ -125,7 +132,17 @@ export class ProcessingHelper {
       const customProviders = credManager.getCustomProviders();
       const curlProviders = credManager.getCurlProviders();
       const allProviders = [...(customProviders || []), ...(curlProviders || [])];
-      this.llmHelper.setModel(defaultModel, allProviders);
+
+      // Don't let a cloud default model override an explicitly-configured Ollama mode
+      // when no cloud provider key is actually available. This fixes the dev-mode bug
+      // where USE_OLLAMA=true is ignored because the fallback default model is
+      // 'kimi-k2.6-fast' and the app crashes with "No AI provider configured".
+      const hasCloudProvider = this.llmHelper.hasAnyCloudProvider();
+      if (this.llmHelper.isUsingOllama() && !defaultModel.startsWith('ollama-') && defaultModel !== 'ollama' && !hasCloudProvider) {
+        console.log(`[ProcessingHelper] Keeping Ollama mode; skipping cloud default model override (${defaultModel}) — no cloud provider key available`);
+      } else {
+        this.llmHelper.setModel(defaultModel, allProviders);
+      }
     }
 
     // Load Languages

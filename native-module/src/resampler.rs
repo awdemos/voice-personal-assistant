@@ -1,3 +1,4 @@
+use crate::{safe_println, safe_eprintln};
 use anyhow::Result;
 use rubato::{FftFixedIn, Resampler as RubatoResampler};
 
@@ -13,7 +14,7 @@ impl Resampler {
     pub fn new(input_sample_rate: f64) -> Result<Self> {
         let output_sample_rate = 16000.0;
         
-        println!("[Resampler] Created: {}Hz -> {}Hz (high-quality rubato)", 
+        safe_println!("[Resampler] Created: {}Hz -> {}Hz (high-quality rubato)", 
                  input_sample_rate, output_sample_rate);
         
         // FftFixedIn: Fixed input chunk size, variable output size
@@ -67,7 +68,7 @@ impl Resampler {
                     }
                 }
                 Err(e) => {
-                    println!("[Resampler] Process error: {}", e);
+                    safe_println!("[Resampler] Process error: {}", e);
                 }
             }
         }

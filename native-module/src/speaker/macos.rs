@@ -1,3 +1,4 @@
+use crate::{safe_println, safe_eprintln};
 use super::core_audio;
 use super::sck;
 use anyhow::Result;
@@ -20,20 +21,20 @@ impl SpeakerInput {
 
         if !force_sck {
             // Try CoreAudio Tap first (Default)
-            println!("[SpeakerInput] Initializing CoreAudio Tap backend...");
+            safe_println!("[SpeakerInput] Initializing CoreAudio Tap backend...");
             match core_audio::SpeakerInput::new(device_id.clone()) {
                 Ok(input) => {
-                    println!("[SpeakerInput] CoreAudio Tap backend initialized.");
+                    safe_println!("[SpeakerInput] CoreAudio Tap backend initialized.");
                     return Ok(Self {
                         backend: BackendInput::CoreAudio(input),
                     });
                 }
                 Err(e) => {
-                    println!("[SpeakerInput] CoreAudio Tap initialization failed: {}. Falling back to ScreenCaptureKit.", e);
+                    safe_println!("[SpeakerInput] CoreAudio Tap initialization failed: {}. Falling back to ScreenCaptureKit.", e);
                 }
             }
         } else {
-            println!("[SpeakerInput] SCK backend explicitly requested.");
+            safe_println!("[SpeakerInput] SCK backend explicitly requested.");
         }
 
         // Fallback to ScreenCaptureKit
@@ -90,7 +91,7 @@ impl SpeakerStream {
         match &mut self.backend {
             BackendStream::CoreAudio(s) => s.pause(),
             BackendStream::Sck(_s) => {
-                println!("[SpeakerStream] SCK pause: no-op (managed by capture thread)");
+                safe_println!("[SpeakerStream] SCK pause: no-op (managed by capture thread)");
             }
         }
     }
@@ -101,7 +102,7 @@ impl SpeakerStream {
         match &mut self.backend {
             BackendStream::CoreAudio(s) => s.resume(),
             BackendStream::Sck(_s) => {
-                println!("[SpeakerStream] SCK resume: no-op (stream remains active)");
+                safe_println!("[SpeakerStream] SCK resume: no-op (stream remains active)");
                 Ok(())
             }
         }
