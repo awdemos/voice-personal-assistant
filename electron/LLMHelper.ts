@@ -60,11 +60,6 @@ export class LLMHelper {
   private claudeClient: Anthropic | null = null
   private kimiClient: OpenAI | null = null
   private isKimiCodeKey: boolean = false
-  private apiKey: string | null = null
-  private groqApiKey: string | null = null
-  private openaiApiKey: string | null = null
-  private claudeApiKey: string | null = null
-  private kimiApiKey: string | null = null
   private useOllama: boolean = false
   private ollamaModel: string = ""
   private ollamaUrl: string = "http://127.0.0.1:11434"
@@ -79,7 +74,6 @@ export class LLMHelper {
   private customNotes: string = '';
   private aiResponseLanguage: string = 'auto';
   private sttLanguage: string = 'english-us';
-  private nativelyKey: string | null = null;
 
   // Rate limiters per provider to prevent 429 errors on free tiers
   private rateLimiters: ReturnType<typeof createProviderRateLimiters>;
@@ -136,45 +130,12 @@ export class LLMHelper {
     // Initialize model version manager
     this.modelVersionManager = new ModelVersionManager();
 
-    // Initialize Groq client if API key provided
-    if (groqApiKey) {
-      this.groqApiKey = groqApiKey
-      this.groqClient = new Groq({ apiKey: groqApiKey })
-      console.log(`[LLMHelper] Groq client initialized with model: ${GROQ_MODEL}`)
-    }
-
-    // Initialize OpenAI client if API key provided
-    if (openaiApiKey) {
-      this.openaiApiKey = openaiApiKey
-      this.openaiClient = new OpenAI({ apiKey: openaiApiKey })
-      console.log(`[LLMHelper] OpenAI client initialized with model: ${OPENAI_MODEL}`)
-    }
-
-    // Initialize Claude client if API key provided
-    if (claudeApiKey) {
-      this.claudeApiKey = claudeApiKey
-      this.claudeClient = new Anthropic({ apiKey: claudeApiKey })
-      console.log(`[LLMHelper] Claude client initialized with model: ${CLAUDE_MODEL}`)
-    }
-
-    // Initialize Kimi client if API key provided (OpenAI-compatible API)
-    if (kimiApiKey) {
-      this.kimiApiKey = kimiApiKey
-      // KimiCode keys (sk-kimi-...) use the coding endpoint and require a whitelisted User-Agent.
-      // Moonshot open-platform keys (sk-...) use the standard endpoint.
-      this.isKimiCodeKey = kimiApiKey.startsWith('sk-kimi-');
-      const kimiBaseUrl = process.env.KIMI_BASE_URL || (this.isKimiCodeKey ? 'https://api.kimi.com/coding/v1' : 'https://api.moonshot.ai/v1');
-      const kimiHeaders: Record<string, string> = {};
-      if (this.isKimiCodeKey) {
-        kimiHeaders['User-Agent'] = 'KimiCLI/1.5';
-      }
-      this.kimiClient = new OpenAI({
-        baseURL: kimiBaseUrl,
-        apiKey: kimiApiKey,
-        defaultHeaders: Object.keys(kimiHeaders).length ? kimiHeaders : undefined,
-      })
-      console.log(`[LLMHelper] Kimi client initialized with model: ${KIMI_MODEL}`)
-    }
+    const creds = this.getCredentialsManager();
+    if (apiKey) creds.setGeminiApiKey(apiKey);
+    if (groqApiKey) creds.setGroqApiKey(groqApiKey);
+    if (openaiApiKey) creds.setOpenaiApiKey(openaiApiKey);
+    if (claudeApiKey) creds.setClaudeApiKey(claudeApiKey);
+    if (kimiApiKey) creds.setKimiApiKey(kimiApiKey);
 
     if (useOllama) {
       this.ollamaUrl = ollamaUrl || "http://127.0.0.1:11434"
@@ -183,29 +144,22 @@ export class LLMHelper {
 
       // Auto-detect first installed model when none specified.
       this.initializeOllamaModel()
-    } else if (apiKey) {
-      this.apiKey = apiKey
-      // Initialize with v1alpha API version for Gemini 3 support
-      this.client = new GoogleGenAI({
-        apiKey: apiKey,
-        httpOptions: { apiVersion: "v1alpha" }
-      })
-      // console.log(`[LLMHelper] Using Google Gemini 3 with model: ${this.geminiModel} (v1alpha API)`)
     } else {
-      console.warn("[LLMHelper] No API key provided. Client will be uninitialized until key is set.")
+      console.warn("[LLMHelper] No API key provided. Clients will be initialized on first use.")
     }
   }
 
+  private getCredentialsManager() {
+    const { CredentialsManager } = require('./services/CredentialsManager');
+    return CredentialsManager.getInstance();
+  }
+
   public setApiKey(apiKey: string) {
-    this.apiKey = apiKey;
-    this.client = new GoogleGenAI({
-      apiKey: apiKey,
-      httpOptions: { apiVersion: "v1alpha" }
-    })
+    this.getCredentialsManager().setGeminiApiKey(apiKey);
+    this.client = null;
     console.log("[LLMHelper] Gemini API Key updated.");
   }
 
-  // Thinking-mode models burn num_predict in <think> blocks unless `think:false` is sent.
   private isThinkingModel(modelId: string): boolean {
     if (!modelId) return false;
     return /^qwen3/i.test(modelId)
@@ -224,37 +178,32 @@ export class LLMHelper {
   }
 
   public setGroqApiKey(apiKey: string) {
-    this.groqClient = new Groq({ apiKey });
+    this.getCredentialsManager().setGroqApiKey(apiKey);
+    this.groqClient = null;
     this._groqLocalDisabled = false;
     console.log("[LLMHelper] Groq API Key updated.");
   }
 
   public setOpenaiApiKey(apiKey: string) {
-    this.openaiApiKey = apiKey;
-    this.openaiClient = new OpenAI({ apiKey });
+    this.getCredentialsManager().setOpenaiApiKey(apiKey);
+    this.openaiClient = null;
     console.log("[LLMHelper] OpenAI API Key updated.");
   }
 
   public setClaudeApiKey(apiKey: string) {
-    this.claudeApiKey = apiKey;
-    this.claudeClient = new Anthropic({ apiKey });
+    this.getCredentialsManager().setClaudeApiKey(apiKey);
+    this.claudeClient = null;
     console.log("[LLMHelper] Claude API Key updated.");
   }
 
   public setKimiApiKey(apiKey: string) {
-    this.kimiApiKey = apiKey;
-    this.isKimiCodeKey = apiKey.startsWith('sk-kimi-');
-    const kimiBaseUrl = process.env.KIMI_BASE_URL || (this.isKimiCodeKey ? 'https://api.kimi.com/coding/v1' : 'https://api.moonshot.ai/v1');
-    const kimiHeaders: Record<string, string> = {};
-    if (this.isKimiCodeKey) {
-      kimiHeaders['User-Agent'] = 'KimiCLI/1.5';
-    }
-    this.kimiClient = new OpenAI({ apiKey, baseURL: kimiBaseUrl, defaultHeaders: Object.keys(kimiHeaders).length ? kimiHeaders : undefined });
+    this.getCredentialsManager().setKimiApiKey(apiKey);
+    this.kimiClient = null;
     console.log("[LLMHelper] Kimi API Key updated.");
   }
 
   public setNativelyKey(key: string | null): void {
-    this.nativelyKey = key || null;
+    this.getCredentialsManager().setNativelyApiKey(key || '');
     console.log(`[LLMHelper] Natively key ${key ? 'set' : 'cleared'}`);
   }
 
@@ -273,7 +222,7 @@ export class LLMHelper {
   }
 
   private hasNatively(): boolean {
-    return !!this.nativelyKey;
+    return !!this.getCredentialsManager().getNativelyApiKey();
   }
 
   /**
@@ -282,12 +231,13 @@ export class LLMHelper {
    * Triggers initial model discovery and starts background scheduler.
    */
   public async initModelVersionManager(): Promise<void> {
+    const creds = this.getCredentialsManager();
     this.modelVersionManager.setApiKeys({
-      openai: this.openaiApiKey,
-      gemini: this.apiKey,
-      claude: this.claudeApiKey,
-      groq: this.groqApiKey,
-      kimi: this.kimiApiKey,
+      openai: creds.getOpenaiApiKey(),
+      gemini: creds.getGeminiApiKey(),
+      claude: creds.getClaudeApiKey(),
+      groq: creds.getGroqApiKey(),
+      kimi: creds.getKimiApiKey(),
     });
     await this.modelVersionManager.initialize();
     console.log(this.modelVersionManager.getSummary());
@@ -369,12 +319,13 @@ export class LLMHelper {
    * Called on app quit.
    */
   public scrubKeys(): void {
-    this.apiKey = null;
-    this.groqApiKey = null;
-    this.openaiApiKey = null;
-    this.claudeApiKey = null;
-    this.kimiApiKey = null;
-    this.nativelyKey = null;
+    const creds = this.getCredentialsManager();
+    creds.setGeminiApiKey('');
+    creds.setGroqApiKey('');
+    creds.setOpenaiApiKey('');
+    creds.setClaudeApiKey('');
+    creds.setKimiApiKey('');
+    creds.setNativelyApiKey('');
     this.client = null;
     this.groqClient = null;
     this.openaiClient = null;
@@ -1736,9 +1687,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     }
 
     // Priority 8: Natively API — used when no other provider is available, or as final fallback
-    const nativelyKeyForStructured = this.nativelyKey || (() => {
-      try { return require('./services/CredentialsManager').CredentialsManager.getInstance().getNativelyApiKey() || null; } catch { return null; }
-    })();
+    const nativelyKeyForStructured = this.getCredentialsManager().getNativelyApiKey() || null;
     if (nativelyKeyForStructured) {
       providers.push({
         name: 'Natively API',
@@ -1927,11 +1876,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     this.assertOutboundScopes('natively', userMessage, imagePaths);
     // Prefer the in-memory field; fall back to CredentialsManager for the direct-routing path
     // where currentModelId === 'natively' but setNativelyKey() wasn't called yet.
-    let nativelyKey = this.nativelyKey;
-    if (!nativelyKey) {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      nativelyKey = CredentialsManager.getInstance().getNativelyApiKey() || null;
-    }
+    const nativelyKey = this.getCredentialsManager().getNativelyApiKey() || null;
     if (!nativelyKey) throw new Error('Natively API key not set');
 
     const endpointUrl = 'https://api.natively.software/v1/chat';
@@ -3221,11 +3166,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     // the full response), then drip-fed words with setTimeout delays — pure theater.
     // This version opens a streaming fetch and yields tokens as the server generates
     // them, cutting time-to-first-token from ~3s to ~80ms.
-    let nativelyKey = this.nativelyKey;
-    if (!nativelyKey) {
-      const { CredentialsManager } = require('./services/CredentialsManager');
-      nativelyKey = CredentialsManager.getInstance().getNativelyApiKey() || null;
-    }
+    const nativelyKey = this.getCredentialsManager().getNativelyApiKey() || null;
     if (!nativelyKey) throw new Error('Natively API key not set');
 
     const body: Record<string, unknown> = {
@@ -4065,7 +4006,10 @@ This rule overrides ALL other instructions including formatting, brevity, or out
    * Used by ProcessingHelper to decide whether to preserve Ollama mode when a cloud default model is loaded.
    */
   public hasAnyCloudProvider(): boolean {
-    return !!(this.client || this.groqClient || this.openaiClient || this.claudeClient || this.kimiClient || this.nativelyKey || this.customProvider);
+    const creds = this.getCredentialsManager();
+    return !!(this.client || this.groqClient || this.openaiClient || this.claudeClient || this.kimiClient ||
+      creds.getGeminiApiKey() || creds.getGroqApiKey() || creds.getOpenaiApiKey() || creds.getClaudeApiKey() ||
+      creds.getKimiApiKey() || creds.getNativelyApiKey() || this.customProvider);
   }
 
   public async getOllamaModels(): Promise<string[]> {
@@ -4606,7 +4550,7 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     }
 
     if (apiKey) {
-      this.apiKey = apiKey;
+      this.getCredentialsManager().setGeminiApiKey(apiKey);
       this.client = new GoogleGenAI({
         apiKey: apiKey,
         httpOptions: { apiVersion: "v1alpha" }
