@@ -33,6 +33,7 @@ import { promisify } from 'util';
 import axios from 'axios';
 import { createProviderRateLimiters, RateLimiter } from './services/RateLimiter';
 import { CodexCliConfig, CodexCliService, DEFAULT_CODEX_CLI_CONFIG } from './services/CodexCliService';
+import { OpenAIAdapter, ClaudeAdapter, GroqAdapter } from './llm/adapters';
 const execAsync = promisify(exec);
 
 interface OllamaResponse {
@@ -55,9 +56,6 @@ const IMAGE_ANALYSIS_PROMPT = `Analyze concisely. Be direct. No markdown formatt
 
 export class LLMHelper {
   private client: GoogleGenAI | null = null
-  private groqClient: Groq | null = null
-  private openaiClient: OpenAI | null = null
-  private claudeClient: Anthropic | null = null
   private kimiClient: OpenAI | null = null
   private isKimiCodeKey: boolean = false
   private useOllama: boolean = false
@@ -75,6 +73,10 @@ export class LLMHelper {
   private aiResponseLanguage: string = 'auto';
   private sttLanguage: string = 'english-us';
 
+  private openaiAdapter: OpenAIAdapter;
+  private claudeAdapter: ClaudeAdapter;
+  private groqAdapter: GroqAdapter;
+
   // Rate limiters per provider to prevent 429 errors on free tiers
   private rateLimiters: ReturnType<typeof createProviderRateLimiters>;
 
@@ -83,6 +85,21 @@ export class LLMHelper {
 
   // Local-only mode: when enabled, cloud providers are blocked
   private isLocalOnlyMode: boolean = false;
+
+  private get openaiClient(): OpenAI | null {
+    try { return this.openaiAdapter.getClient(); } catch { return null; }
+  }
+  private set openaiClient(_: null) { this.openaiAdapter.reset(); }
+
+  private get claudeClient(): Anthropic | null {
+    try { return this.claudeAdapter.getClient(); } catch { return null; }
+  }
+  private set claudeClient(_: null) { this.claudeAdapter.reset(); }
+
+  private get groqClient(): Groq | null {
+    try { return this.groqAdapter.getClient(); } catch { return null; }
+  }
+  private set groqClient(_: null) { this.groqAdapter.reset(); }
 
   // Self-improving model version manager for vision analysis
   private modelVersionManager: ModelVersionManager;
@@ -121,11 +138,11 @@ export class LLMHelper {
   constructor(apiKey?: string, useOllama: boolean = false, ollamaModel?: string, ollamaUrl?: string, groqApiKey?: string, openaiApiKey?: string, claudeApiKey?: string, kimiApiKey?: string) {
     this.useOllama = useOllama
 
-    // Initialize rate limiters
     this.rateLimiters = createProviderRateLimiters();
-
-    // Initialize policy-aware provider router
     this.providerRouter = new ProviderRouter();
+    this.openaiAdapter = new OpenAIAdapter(this.rateLimiters.openai);
+    this.claudeAdapter = new ClaudeAdapter(this.rateLimiters.claude);
+    this.groqAdapter = new GroqAdapter(this.rateLimiters.groq);
 
     // Initialize model version manager
     this.modelVersionManager = new ModelVersionManager();
@@ -179,20 +196,20 @@ export class LLMHelper {
 
   public setGroqApiKey(apiKey: string) {
     this.getCredentialsManager().setGroqApiKey(apiKey);
-    this.groqClient = null;
+    this.groqAdapter.reset();
     this._groqLocalDisabled = false;
     console.log("[LLMHelper] Groq API Key updated.");
   }
 
   public setOpenaiApiKey(apiKey: string) {
     this.getCredentialsManager().setOpenaiApiKey(apiKey);
-    this.openaiClient = null;
+    this.openaiAdapter.reset();
     console.log("[LLMHelper] OpenAI API Key updated.");
   }
 
   public setClaudeApiKey(apiKey: string) {
     this.getCredentialsManager().setClaudeApiKey(apiKey);
-    this.claudeClient = null;
+    this.claudeAdapter.reset();
     console.log("[LLMHelper] Claude API Key updated.");
   }
 
@@ -327,11 +344,10 @@ export class LLMHelper {
     creds.setKimiApiKey('');
     creds.setNativelyApiKey('');
     this.client = null;
-    this.groqClient = null;
-    this.openaiClient = null;
-    this.claudeClient = null;
     this.kimiClient = null;
-    // Destroy rate limiters
+    this.openaiAdapter.reset();
+    this.claudeAdapter.reset();
+    this.groqAdapter.reset();
     if (this.rateLimiters) {
       Object.values(this.rateLimiters).forEach(rl => rl.destroy());
     }
@@ -1740,42 +1756,16 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     );
   }
 
-  /**
-   * Non-streaming Groq generation.
-   *
-   * PREFIX CACHING: Groq auto-caches based on the leading bytes of the messages
-   * array. Pass `systemPrompt` SEPARATELY (not concatenated into `userMessage`)
-   * so the static system block becomes a stable cacheable prefix across turns.
-   * Bundling system into user content (the previous behavior) breaks the cache
-   * because the user content changes every turn.
-   *
-   * For backwards compatibility, this method still accepts a single bundled
-   * string when `systemPrompt` is omitted — callers should migrate to the
-   * two-arg form.
-   */
   private async generateWithGroq(userMessage: string, modelId: string = GROQ_MODEL, systemPrompt?: string): Promise<string> {
     if (this.isLocalOnlyMode) throw new Error("Cloud providers disabled in local-only mode");
     if (!this.groqClient) throw new Error("Groq client not initialized");
     this.assertOutboundScopes('groq', userMessage);
 
-    await this.rateLimiters.groq.acquire();
-
-    const messages: any[] = [];
-    if (systemPrompt) {
-      // CACHE-CACHEABLE PREFIX: must come first, must be byte-identical across turns.
-      messages.push({ role: "system", content: systemPrompt });
-    }
-    messages.push({ role: "user", content: userMessage });
-
-    const response = await this.groqClient.chat.completions.create({
-      model: modelId,
-      messages,
-      temperature: 0.4,
-      max_tokens: 8192,
-      stream: false
+    return this.groqAdapter.generate({
+      text: userMessage,
+      systemPrompt,
+      modelId,
     });
-
-    return response.choices[0]?.message?.content || "";
   }
 
   /**
@@ -1952,51 +1942,18 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     return data.content || '';
   }
 
-  /**
-   * Non-streaming OpenAI generation with proper system/user separation.
-   * PREFIX CACHING: see streamWithOpenai for the caching contract.
-   */
   private async generateWithOpenai(userMessage: string, systemPrompt?: string, imagePaths?: string[], modelId?: string): Promise<string> {
     if (this.isLocalOnlyMode) throw new Error("Cloud providers disabled in local-only mode");
     if (!this.openaiClient) throw new Error("OpenAI client not initialized");
     this.assertOutboundScopes('openai', userMessage, imagePaths);
 
-    await this.rateLimiters.openai.acquire();
-
-    // Use explicit override, then current model if it's OpenAI, else baseline constant
     const model = modelId || (this.isOpenAiModel(this.currentModelId) ? this.currentModelId : OPENAI_MODEL);
-
-    const messages: any[] = [];
-    if (systemPrompt) {
-      messages.push({ role: "system", content: systemPrompt });
-    }
-
-    if (imagePaths?.length) {
-      const contentParts: any[] = [{ type: "text", text: userMessage }];
-      for (const p of imagePaths) {
-        if (fs.existsSync(p)) {
-          const { mimeType, data } = await this.processImage(p);
-          contentParts.push({ type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } });
-        }
-      }
-      messages.push({ role: "user", content: contentParts });
-    } else {
-      messages.push({ role: "user", content: userMessage });
-    }
-
-    const cacheKey = this.getOpenAiPromptCacheKey(systemPrompt);
-    const response = await this.withTimeout(
-      this.withRetry(() => this.openaiClient!.chat.completions.create({
-        model,
-        messages,
-        max_completion_tokens: model.toLowerCase().includes('claude') ? this.getClaudeMaxOutput(model) : MAX_OUTPUT_TOKENS,
-        ...(cacheKey ? { prompt_cache_key: cacheKey } : {}),
-      })),
-      60000,
-      `OpenAI (${model})`
-    );
-
-    return response.choices[0]?.message?.content || "";
+    return this.openaiAdapter.generate({
+      text: userMessage,
+      systemPrompt,
+      imagePaths,
+      modelId: model,
+    });
   }
 
   // The handler for cURL requests
@@ -2074,73 +2031,17 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     }
   }
 
-  /**
-   * Non-streaming Claude generation with proper system/user separation
-   */
   private async generateWithClaude(userMessage: string, systemPrompt?: string, imagePaths?: string[], modelId?: string): Promise<string> {
     if (this.isLocalOnlyMode) throw new Error("Cloud providers disabled in local-only mode");
     if (!this.claudeClient) throw new Error("Claude client not initialized");
 
-    await this.rateLimiters.claude.acquire();
-
-    // Use explicit override, then current model if it's Claude, else stable fallback
     const model = modelId || (this.isClaudeModel(this.currentModelId) ? this.currentModelId : CLAUDE_MODEL);
-
-    const content: any[] = [];
-    if (imagePaths?.length) {
-      for (const p of imagePaths) {
-        if (fs.existsSync(p)) {
-          const { mimeType, data } = await this.processImage(p);
-          content.push({
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
-              data,
-            }
-          });
-        }
-      }
-    }
-    content.push({ type: "text", text: userMessage });
-
-    // Use streaming under the hood and accumulate the final message. The Anthropic SDK
-    // throws a pre-flight error on non-streaming `messages.create` when max_tokens is large
-    // enough that the dynamic timeout exceeds 10 minutes (formula: 60*60*max_tokens/128000s,
-    // tripped at max_tokens > ~21333). max_tokens is per-model (see getClaudeMaxOutput);
-    // streaming sidesteps the SDK gate regardless of ceiling.
-    const response = await this.withTimeout(
-      this.withRetry(async () => {
-        const stream = this.claudeClient!.messages.stream({
-          model,
-          max_tokens: this.getClaudeMaxOutput(model),
-          // CACHE BOUNDARY: system blocks are static; dynamic content lives in `messages` only.
-          ...(systemPrompt ? { system: this.buildClaudeSystemBlocks(systemPrompt, model) } : {}),
-          messages: [{ role: "user", content }],
-        });
-        return await stream.finalMessage();
-      }),
-      120000,
-      `Claude (${model})`
-    );
-
-    // One-time confirmation that cache_control is actually engaging. If this
-    // line never fires for a session, the static body is below the model's
-    // per-prompt minimum and we're paying full input price every turn.
-    if (!this._claudeCacheFirstHitLogged) {
-      const usage: any = (response as any).usage;
-      const cacheRead = usage?.cache_read_input_tokens || 0;
-      const cacheCreate = usage?.cache_creation_input_tokens || 0;
-      if (cacheRead > 0) {
-        console.log(`[LLMHelper] Claude prompt cache HIT: ${cacheRead} cached tokens (model=${model}, write=${cacheCreate})`);
-        this._claudeCacheFirstHitLogged = true;
-      } else if (cacheCreate > 0) {
-        console.log(`[LLMHelper] Claude prompt cache WRITE: ${cacheCreate} tokens cached (model=${model}) — subsequent turns should HIT`);
-      }
-    }
-
-    const textBlock = response.content.find((block: any) => block.type === 'text') as any;
-    return textBlock?.text || "";
+    return this.claudeAdapter.generate({
+      text: userMessage,
+      systemPrompt,
+      imagePaths,
+      modelId: model,
+    });
   }
 
   /**
@@ -2327,39 +2228,14 @@ This rule overrides ALL other instructions including formatting, brevity, or out
   }
 
 
-  /**
-   * Non-streaming multimodal response from Groq using Llama 4 Scout
-   */
   private async generateWithGroqMultimodal(userMessage: string, imagePaths: string[], systemPrompt?: string): Promise<string> {
     if (!this.groqClient) throw new Error("Groq client not initialized");
 
-    await this.rateLimiters.groq.acquire();
-
-    const messages: any[] = [];
-    if (systemPrompt) {
-      messages.push({ role: "system", content: systemPrompt });
-    }
-
-    const contentParts: any[] = [{ type: "text", text: userMessage }];
-    for (const p of imagePaths) {
-      if (fs.existsSync(p)) {
-        const { mimeType, data } = await this.processImage(p);
-        contentParts.push({ type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } });
-      }
-    }
-    messages.push({ role: "user", content: contentParts });
-
-    const response = await this.groqClient.chat.completions.create({
-      model: "meta-llama/llama-4-scout-17b-16e-instruct",
-      messages,
-      temperature: 1,
-      max_completion_tokens: 28672,
-      top_p: 1,
-      stream: false,
-      stop: null
+    return this.groqAdapter.generate({
+      text: userMessage,
+      systemPrompt,
+      imagePaths,
     });
-
-    return response.choices[0]?.message?.content || "";
   }
 
   /**
@@ -4568,9 +4444,9 @@ This rule overrides ALL other instructions including formatting, brevity, or out
     this.customProvider = provider;
     this.useOllama = false;
     this.client = null;
-    this.groqClient = null;
-    this.openaiClient = null;
-    this.claudeClient = null;
+    this.openaiAdapter.reset();
+    this.claudeAdapter.reset();
+    this.groqAdapter.reset();
     console.log(`[LLMHelper] Switched to Custom Provider: ${provider.name}`);
   }
 

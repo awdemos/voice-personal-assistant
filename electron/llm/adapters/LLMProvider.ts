@@ -1,4 +1,4 @@
-import type { RateLimiter } from '../services/RateLimiter';
+import type { RateLimiter } from '../../services/RateLimiter';
 
 export interface GenerationRequest {
   text: string;

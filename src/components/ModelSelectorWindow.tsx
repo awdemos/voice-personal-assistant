@@ -54,9 +54,7 @@ const ModelSelectorWindow = () => {
                     // If no models found, try to fix/restart Ollama (server might be down)
                     if (!oModels || oModels.length === 0) {
                         try {
-                            // @ts-ignore
                             if (window.electronAPI?.forceRestartOllama) {
-                                // @ts-ignore
                                 await window.electronAPI.forceRestartOllama();
                                 // Wait a moment for server to come up
                                 await new Promise(resolve => setTimeout(resolve, 1500));

@@ -162,12 +162,10 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   useEffect(() => {
     const loadDefaultModel = async () => {
       try {
-        // @ts-ignore
         const result = await window.electronAPI.getDefaultModel();
         if (result && result.model) {
           setCurrentModel(result.model);
           // Set runtime model to the default
-          // @ts-ignore
           window.electronAPI.setModel(result.model).catch(() => { });
         }
       } catch (error) {
@@ -179,9 +177,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
 
   // Listen for default model changes from Settings
   useEffect(() => {
-    // @ts-ignore
     if (!window.electronAPI?.onModelChanged) return;
-    // @ts-ignore
     const unsubscribe = window.electronAPI.onModelChanged((modelId: string) => {
       setCurrentModel(prev => prev === modelId ? prev : modelId);
     });

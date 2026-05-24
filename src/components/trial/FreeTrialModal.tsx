@@ -109,7 +109,7 @@ export const FreeTrialModal: React.FC<TrialModalProps> = ({ usage, onByok, onSta
   const [error, setError] = useState<string | null>(null);
   const reduced = useReducedMotion() ?? false;
 
-  const openUrl = (url: string) => (window.electronAPI as any)?.openExternal?.(url);
+    const openUrl = (url: string) => window.electronAPI?.openExternal?.(url);
 
   const handleByok = async () => {
     setStep('wiping');

@@ -295,9 +295,7 @@ export const NativelyApiSettings: React.FC = () => {
             if (r.success) {
                 setApiKey('•'.repeat(24)); setIsSaved(true); setJustSaved(true);
                 setTimeout(() => setJustSaved(false), 2500);
-                // @ts-ignore
                 window.electronAPI?.setDefaultModel?.('natively').catch(console.error);
-                // @ts-ignore
                 window.electronAPI?.setSttProvider?.('natively').catch(console.error);
             } else { setError(r.error || 'Failed to save API key'); }
         } catch (e: any) { setError(e.message || 'Unexpected error'); }
@@ -309,7 +307,7 @@ export const NativelyApiSettings: React.FC = () => {
         window.electronAPI.setNativelyApiKey('').catch(() => {});
     };
 
-    const openExternal = (url: string) => { (window.electronAPI as any)?.openExternal?.(url); };
+    const openExternal = (url: string) => { window.electronAPI?.openExternal?.(url); };
 
     const isDirty   = apiKey.length > 0 && !apiKey.includes('•') && !isSaved;
     const planLabel = usageData?.plan ? usageData.plan.charAt(0).toUpperCase() + usageData.plan.slice(1) : null;

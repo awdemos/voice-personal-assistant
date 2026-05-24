@@ -117,7 +117,7 @@ export const NativelyQuotaBanner: React.FC = () => {
                     <div className="flex items-center justify-between pt-0.5">
                         <span className="text-[11px] text-white/30">Resets on your next billing date</span>
                         <button
-                            onClick={() => (window.electronAPI as any)?.openExternal?.(UPGRADE_URL)}
+                            onClick={() => window.electronAPI?.openExternal?.(UPGRADE_URL)}
                             className="flex items-center gap-1 text-[11px] font-semibold text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
                         >
                             Upgrade <ArrowUpRight size={11} strokeWidth={2.5} />

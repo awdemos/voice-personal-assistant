@@ -720,9 +720,8 @@ const NativelyInterface: React.FC<NativelyInterfaceProps> = ({
         const rect = contentRef.current.getBoundingClientRect();
         const width = isExpandedRef.current ? STABLE_OVERLAY_WIDTH : Math.ceil(rect.width);
         const height = Math.ceil(rect.height);
-        const api = window.electronAPI as any;
-        if (api?.updateContentDimensionsCentered) {
-            api.updateContentDimensionsCentered({ width, height });
+        if (window.electronAPI?.updateContentDimensionsCentered) {
+            window.electronAPI.updateContentDimensionsCentered({ width, height });
         } else {
             window.electronAPI?.updateContentDimensions({ width, height });
         }

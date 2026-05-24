@@ -40,13 +40,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
         // Report to analytics if IPC is available (non-blocking)
         try {
-            // @ts-ignore  
             window.electronAPI?.logErrorToMain?.({
                 type: 'uncaught-render-error',
                 context,
-                message: error?.message,
-                stack: error?.stack,
-                componentStack: info.componentStack
+                message: error?.message ?? undefined,
+                stack: error?.stack ?? undefined,
+                componentStack: info.componentStack ?? undefined
             });
         } catch { /* analytics must never crash the handler */ }
     }

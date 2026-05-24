@@ -8,7 +8,7 @@ interface CustomProvider {
     id: string;
     name: string;
     curlCommand: string;
-    responsePath: string;
+    responsePath?: string;
 }
 
 interface ModelOption {
@@ -161,7 +161,6 @@ export const AIProvidersSettings: React.FC = () => {
                 // If we set fastResponseMode before hasStoredKey is populated, the enforcement
                 // effect below fires with canUseFastMode=false and immediately resets fast mode
                 // to false — writing that reset back to SettingsManager on every startup.
-                // @ts-ignore
                 const creds = await window.electronAPI?.getStoredCredentials?.();
                 if (creds) {
                     setHasStoredKey({
@@ -183,7 +182,6 @@ export const AIProvidersSettings: React.FC = () => {
 
                 // Now it's safe to read fast mode — hasStoredKey is already set so
                 // canUseFastMode will be correct when the enforcement effect runs.
-                // @ts-ignore
                 const cliConfig = await window.electronAPI?.getCodexCliConfig?.();
                 if (cliConfig) setCodexCliConfig(cliConfig);
 
@@ -193,14 +191,12 @@ export const AIProvidersSettings: React.FC = () => {
                 // Mark credentials as fully loaded so the enforcement effect can fire
                 setCredentialsLoaded(true);
 
-                // @ts-ignore
                 const custom = await window.electronAPI?.getCustomProviders();
                 if (custom) {
                     setCustomProviders(custom);
                 }
 
                 // Load persisted default model
-                // @ts-ignore
                 const result = await window.electronAPI?.getDefaultModel();
                 if (result && result.model) {
                     setDefaultModel(result.model);
@@ -218,7 +214,6 @@ export const AIProvidersSettings: React.FC = () => {
 
         // Listen for changes from other windows (2-way sync)
         if (window.electronAPI?.onGroqFastTextChanged) {
-            // @ts-ignore
             const unsubscribe = window.electronAPI.onGroqFastTextChanged((enabled: boolean) => {
                 setFastResponseMode(enabled);
                 localStorage.setItem('natively_groq_fast_text', String(enabled));
@@ -235,7 +230,6 @@ export const AIProvidersSettings: React.FC = () => {
         if (!canUseFastMode && fastResponseMode) {
             setFastResponseMode(false);
             localStorage.setItem('natively_groq_fast_text', 'false');
-            // @ts-ignore
             window.electronAPI?.setGroqFastTextMode(false);
         }
     }, [credentialsLoaded, canUseFastMode, fastResponseMode]);
@@ -255,8 +249,7 @@ export const AIProvidersSettings: React.FC = () => {
     const ensureOllamaStartup = async () => {
         setOllamaStatus('checking');
         try {
-            // @ts-ignore
-            const result = await window.electronAPI?.invoke?.('ensure-ollama-running');
+            const result = await window.electronAPI?.invoke?.<{ success: boolean }>('ensure-ollama-running');
             if (result && result.success) {
                 // It's running (or just started), now fetch models
                 checkOllama(true);
@@ -274,7 +267,6 @@ export const AIProvidersSettings: React.FC = () => {
         // if (isInitial) setOllamaStatus('checking'); 
 
         try {
-            // @ts-ignore
             const models = await window.electronAPI?.getAvailableOllamaModels?.();
             if (models && models.length > 0) {
                 setOllamaModels(models);
@@ -297,8 +289,7 @@ export const AIProvidersSettings: React.FC = () => {
     const handleFixOllama = async () => {
         setOllamaStatus('fixing');
         try {
-            // @ts-ignore
-            const result = await window.electronAPI?.invoke?.('force-restart-ollama');
+            const result = await window.electronAPI?.invoke?.<{ success: boolean }>('force-restart-ollama');
             if (result && result.success) {
                 setOllamaRestarted(true);
                 // Wait for server to be ready
@@ -395,8 +386,7 @@ export const AIProvidersSettings: React.FC = () => {
         setTestError(prev => ({ ...prev, [provider]: '' }));
 
         try {
-            // @ts-ignore
-            const result = await window.electronAPI.testLlmConnection(provider, key);
+            const result = await window.electronAPI.testLlmConnection(provider as 'gemini' | 'groq' | 'openai' | 'claude', key);
             if (result.success) {
                 setTestStatus(prev => ({ ...prev, [provider]: 'success' }));
                 setTimeout(() => setTestStatus(prev => ({ ...prev, [provider]: 'idle' })), 3000);
@@ -463,11 +453,9 @@ export const AIProvidersSettings: React.FC = () => {
         };
 
         try {
-            // @ts-ignore
             const result = await window.electronAPI.saveCustomProvider(newProvider);
             if (result.success) {
                 // Refresh list
-                // @ts-ignore
                 const updated = await window.electronAPI.getCustomProviders();
                 setCustomProviders(updated);
                 setIsEditingCustom(false);
@@ -482,10 +470,8 @@ export const AIProvidersSettings: React.FC = () => {
     const handleDeleteCustom = async (id: string) => {
         if (!confirm("Are you sure you want to delete this provider?")) return;
         try {
-            // @ts-ignore
             const result = await window.electronAPI.deleteCustomProvider(id);
             if (result.success) {
-                // @ts-ignore
                 const updated = await window.electronAPI.getCustomProviders();
                 setCustomProviders(updated);
             }
@@ -544,7 +530,6 @@ export const AIProvidersSettings: React.FC = () => {
                         })()}
                         onChange={(val) => {
                             setDefaultModel(val);
-                            // @ts-ignore - persist as default + update runtime + broadcast
                             window.electronAPI?.setDefaultModel(val).catch(console.error);
                         }}
                     />
@@ -574,7 +559,6 @@ export const AIProvidersSettings: React.FC = () => {
                             const newState = !fastResponseMode;
                             setFastResponseMode(newState);
                             localStorage.setItem('natively_groq_fast_text', String(newState));
-                            // @ts-ignore
                             await window.electronAPI?.setGroqFastTextMode(newState);
                         }}
                         className={`shrink-0 w-11 h-6 rounded-full relative cursor-pointer transition-colors ${!canUseFastMode ? 'cursor-not-allowed bg-bg-toggle-switch' : fastResponseMode ? 'bg-orange-500' : 'bg-bg-toggle-switch border border-border-muted'}`}

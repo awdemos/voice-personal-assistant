@@ -21,7 +21,6 @@ const SettingsPopup = () => {
     // Load credentials func
     const loadCredentials = async () => {
         try {
-            // @ts-ignore
             const creds = await window.electronAPI?.getStoredCredentials?.();
             if (creds) {
                 setHasStoredKey({
@@ -46,7 +45,6 @@ const SettingsPopup = () => {
         // Load profile status
         const loadProfile = async () => {
             try {
-                // @ts-ignore
                 const status = await window.electronAPI?.profileGetStatus?.();
                 if (status) {
                     setHasProfile(status.hasProfile);
@@ -100,7 +98,6 @@ const SettingsPopup = () => {
             isFirstRender.current = false;
             // Ensure backend is synced on mount (even if no change)
             try {
-                // @ts-ignore
                 window.electronAPI?.invoke('set-groq-fast-text-mode', useGroqFastText);
             } catch (e) {
                 console.error(e);
@@ -111,7 +108,6 @@ const SettingsPopup = () => {
         // Apply Groq Text Mode
         localStorage.setItem('natively_groq_fast_text', String(useGroqFastText));
         try {
-            // @ts-ignore - electronAPI not typed in this file yet
             window.electronAPI?.invoke('set-groq-fast-text-mode', useGroqFastText);
         } catch (e) {
             console.error(e);
@@ -137,13 +133,10 @@ const SettingsPopup = () => {
 
     // Load action button mode and subscribe to changes from other windows
     useEffect(() => {
-        // @ts-ignore
         window.electronAPI?.getActionButtonMode?.()?.then((mode: 'recap' | 'brainstorm') => {
             setActionButtonModeState(mode ?? 'recap');
         }).catch(() => {});
-        // @ts-ignore
         if (!window.electronAPI?.onActionButtonModeChanged) return;
-        // @ts-ignore
         const unsubscribe = window.electronAPI.onActionButtonModeChanged((mode: 'recap' | 'brainstorm') => {
             setActionButtonModeState(mode);
         });
@@ -161,7 +154,6 @@ const SettingsPopup = () => {
                 const rect = entry.target.getBoundingClientRect();
                 // Send exact dimensions to Electron
                 try {
-                    // @ts-ignore
                     window.electronAPI?.updateContentDimensions({
                         width: Math.ceil(rect.width),
                         height: Math.ceil(rect.height)
@@ -290,7 +282,6 @@ const SettingsPopup = () => {
                             const newMode: 'recap' | 'brainstorm' = actionButtonMode === 'brainstorm' ? 'recap' : 'brainstorm';
                             setActionButtonModeState(newMode);
                             try {
-                                // @ts-ignore
                                 await window.electronAPI?.setActionButtonMode?.(newMode);
                             } catch (e) { console.error(e); }
                         }}
@@ -316,7 +307,6 @@ const SettingsPopup = () => {
                                 const newState = !profileMode;
                                 setProfileMode(newState);
                                 try {
-                                    // @ts-ignore
                                     await window.electronAPI?.profileSetMode?.(newState);
                                 } catch (e) { console.error(e); }
                             }}

@@ -49,9 +49,7 @@ export const NativelyProSettings: React.FC = () => {
 
         // Optional: listen to license status changes if the main process sends them
         const onStatusChanged = () => refreshLicense();
-        // @ts-ignore
         if (window.electronAPI?.onLicenseStatusChanged) {
-            // @ts-ignore
             window.electronAPI.onLicenseStatusChanged(onStatusChanged);
         }
     }, []);
@@ -95,7 +93,7 @@ export const NativelyProSettings: React.FC = () => {
         setTimeout(() => setCopiedHwid(false), 2000);
     };
 
-    const openExternal = (url: string) => { (window.electronAPI as any)?.openExternal?.(url); };
+    const openExternal = (url: string) => { window.electronAPI?.openExternal?.(url); };
 
     if (isPremium === null) {
         return <div className="p-8 flex justify-center"><div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>;

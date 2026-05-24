@@ -95,7 +95,6 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
 
             // Fetch models using the key (or stored key)
             const keyToUse = apiKey.trim() || '';
-            // @ts-ignore
             const result = await window.electronAPI?.fetchProviderModels(providerId, keyToUse);
 
             if (result?.success && result.models) {
@@ -106,7 +105,6 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
                     if (!existsInList) {
                         const firstModel = result.models[0].id;
                         setSelectedModel(firstModel);
-                        // @ts-ignore
                         await window.electronAPI?.setProviderPreferredModel(providerId, firstModel);
                         if (onPreferredModelChange) {
                             onPreferredModelChange(firstModel);
@@ -127,7 +125,6 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
         setSelectedModel(modelId);
         setIsDropdownOpen(false);
         try {
-            // @ts-ignore
             await window.electronAPI?.setProviderPreferredModel(providerId, modelId);
             if (onPreferredModelChange) {
                 onPreferredModelChange(modelId);
@@ -148,7 +145,6 @@ export const ProviderCard: React.FC<ProviderCardProps> = ({
                 </label>
                 <button
                     onClick={() => {
-                        // @ts-ignore
                         window.electronAPI?.openExternal(keyUrl);
                     }}
                     className="text-xs text-text-tertiary hover:text-text-primary flex items-center gap-1 transition-colors"

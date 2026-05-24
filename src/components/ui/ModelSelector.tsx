@@ -47,7 +47,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({ currentModel, onSe
                 if (local) setOllamaModels(local);
 
                 // Build dynamic cloud models from credentials
-                // @ts-ignore
                 const creds = await window.electronAPI?.getStoredCredentials?.();
                 const cModels: { id: string; name: string; desc: string; provider: string }[] = [];
 
